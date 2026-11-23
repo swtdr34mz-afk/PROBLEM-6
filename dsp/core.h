@@ -42,6 +42,19 @@ float clock_pos(void);                   /* where the clock is now, in ticks (wi
 float clock_spt(void);                   /* samples a tick now */
 
 /* small helpers */
+/* fastmath's small ones, forced inline (the compiler for the FM-1 may leave them out of line, and RAM code cannot
+ * reach the flash): a unit that runs code from RAM defines RAM_INLINE_MATH before including this */
+INL float ri_minf(float a, float b) { return a < b ? a : b; }
+INL float ri_maxf(float a, float b) { return a > b ? a : b; }
+INL float ri_clampf(float x, float lo, float hi) { return x < lo ? lo : x > hi ? hi : x; }
+INL float ri_fabsf(float x)
+{
+    fm_bits_t b;
+    b.f = x;
+    b.u &= 0x7FFFFFFFu;
+    return b.f;
+}
+
 /* 2^x, as fastmath's fm_exp2f (the same polynomial), forced inline for the RAM code */
 INL float ex2(float x)
 {
@@ -89,3 +102,10 @@ INL uint32_t rnd_u(uint32_t *s)
     return x;
 }
 INL float rnd_f(uint32_t *s) { return (float)(int32_t)rnd_u(s) * (1.0f / 2147483648.0f); }   /* -1..1 */
+
+#ifdef RAM_INLINE_MATH
+#define fm_minf ri_minf
+#define fm_maxf ri_maxf
+#define fm_clampf ri_clampf
+#define fm_fabsf ri_fabsf
+#endif

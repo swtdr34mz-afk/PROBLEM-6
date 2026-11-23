@@ -10,6 +10,7 @@
  * The oscillators are band-limited with a polynomial BLEP applied as events: each step in a waveform (a saw's reset,
  * a pulse's two edges, a hard-sync reset) is found where it falls between two samples and smoothed over those two
  * samples (the output runs one sample late for that). Hard sync and audio-rate pulse-width modulation stay clean. */
+#define RAM_INLINE_MATH                  /* (voices_render runs from RAM: core.h) */
 #include "core.h"
 #include "plat.h"
 
