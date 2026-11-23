@@ -42,6 +42,8 @@ enum {
     P_L2_RATE, P_L2_AMT, P_L2_SHAPE, P_L2_DEST,        /* LFO 2 (v0.2: added after, so older presets load) */
     P_L1_SYNC, P_L2_SYNC, P_L1_RETRIG, P_L2_RETRIG,    /* LFO SYNC */
     P_AT_DEST, P_AT_AMT, P_AT_CURVE, P_AT_SMOOTH,      /* AFTERTOUCH (v0.5) */
+    P_DL_TIME_L, P_DL_TIME_R, P_DL_FB, P_DL_MIX,       /* DELAY (v0.6) */
+    P_DL_DEPTH, P_DL_RATE, P_DL_TONE, P_DL_SYNC,       /* DELAY MOD */
     NPARAM
 };
 typedef struct {
@@ -50,7 +52,7 @@ typedef struct {
     uint8_t max;                       /* the largest value (127 for a knob, n - 1 for a choice) */
     const char *const *choice;         /* PK_CHOICE: the names */
 } param_t;
-enum { PK_KNOB, PK_BIPOLAR, PK_SEMI, PK_FINE, PK_TIME, PK_CHOICE, PK_PCT, PK_HZ };
+enum { PK_KNOB, PK_BIPOLAR, PK_SEMI, PK_FINE, PK_TIME, PK_CHOICE, PK_PCT, PK_HZ, PK_DTIME };
 extern const param_t PARAMS[NPARAM];
 void param_text(int p, int v, char *out);     /* the value as shown (up to 8 characters) */
 
@@ -68,6 +70,11 @@ extern const uint16_t LSY_TICKS[NLSY];   /* a cycle, in clock ticks (24 a quarte
 enum { PMF_OFF, PMF_LPF, PMF_HPF, PMF_BOTH, NPMF };
 enum { RV_ROOM, RV_HALL, RV_PLATE, RV_SPRING, RV_SPACE, NRV };
 /* AFTERTOUCH: what pressing harder does (OFFWORLD's FILTER, SWELL, POWER, VIBRATO, and the Prophet-6's own) */
+/* DELAY SYNC: the times free (ms), or notes of the clock */
+enum { DLS_OFF, DLS_ON, NDLSYNC };
+#define NDLS 12
+extern const uint8_t DL_SYNC_TICKS[NDLS];   /* synced: TIME's 128 positions over these notes (in clock ticks) */
+extern const char *const DL_SYNC_NAME[NDLS];
 enum { AT_OFF, AT_FILTER, AT_SWELL, AT_POWER, AT_VIBRATO, AT_LFO, AT_PITCH, AT_POLYMOD, NAT };
 
 /* the presets */

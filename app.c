@@ -33,7 +33,8 @@
 #include "engine.h"
 
 /* ----------------------------------------------------------------- settings --- */
-#define SET_MAGIC 0x34374850u            /* "PH74": the settings record (v0.5: AFTERTOUCH, the LOW SPLIT) */
+#define SET_MAGIC 0x35374850u            /* "PH75": the settings record (v0.6: the DELAY) */
+#define SET_MAGIC_V4 0x34374850u         /* "PH74": v0.5's: 66 parameters a preset, the LOW SPLIT after the globals */
 #define SET_MAGIC_V3 0x33374850u         /* "PH73": v0.3/0.4's: 62 parameters a preset */
 #define SET_MAGIC_V2 0x32374850u         /* "PH72": v0.2's: 62, CUTOFF 0..127 */
 #define SET_MAGIC_V1 0x31374850u         /* "PH71": v0.1's: 54, CUTOFF 0..127 */
@@ -94,7 +95,8 @@ static settings_t set;
 static seqrec_t sq;
 static patch_t ed;                       /* the preset as edited (what sounds) */
 static uint8_t edited;
-static uint8_t set_dirty, seq_dirty;
+static uint8_t set_dirty, seq_dirty, save_now;
+static uint32_t silent_since, save_at;
 static uint32_t dirty_at, seq_dirty_at;
 
 static const uint8_t WK[16] = PLAT_WHITE_KEYS;
@@ -168,12 +170,14 @@ static int settings_old(const uint8_t *raw, int n)
     const uint8_t *g;
     if (magic == SET_MAGIC_V1)
         np = 54;
+    else if (magic == SET_MAGIC_V4)
+        np = 66;
     else if (magic == SET_MAGIC_V2 || magic == SET_MAGIC_V3)
         np = 62;
     else
         return 0;
     off = 4u + NPRESETS * (NAME_LEN + np);
-    if ((uint32_t)n < off + 19u)
+    if ((uint32_t)n < off + (magic == SET_MAGIC_V4 ? 27u : 19u))
         return 0;
     settings_defaults();
     for (i = 0; i < NPRESETS; i++) {
@@ -201,7 +205,18 @@ static int settings_old(const uint8_t *raw, int n)
     set.seq_rate = g[13];
     set.seq_gate = g[14];
     set.seq_tr = (int8_t)g[15];
-    set.kvel = 0;                        /* (v0.5: the keys' own velocity) */
+    if (magic != SET_MAGIC_V4)
+        set.kvel = 0;                    /* (v0.5: the keys' own velocity) */
+    else {                               /* v0.5's LOW SPLIT, after the globals' 3 spare bytes */
+        set.split_oct = g[19];
+        set.split_key = g[20];
+        set.scale_l = g[21];
+        set.scale_r = g[22];
+        set.key = g[23];
+        set.follow = g[24];
+        set.lowhold = g[25];
+        set.balance = (int8_t)g[26];
+    }
     set.magic = SET_MAGIC;
     if (!settings_ok()) {
         settings_defaults();
@@ -269,7 +284,7 @@ static void latch_down(void);
 enum { G_BPM = 0x100, G_SWING, G_KVEL, G_MCH, G_ARP_MODE, G_ARP_RATE, G_ARP_OCT, G_ARP_GATE, G_SEQ_BARS, G_SEQ_RATE,
        G_SEQ_GATE, G_SEQ_TR, G_SPLIT, G_POINT, G_SCALE_L, G_SCALE_R, G_KEY, G_FOLLOW, G_LOWHOLD, G_BALANCE };
 enum { PG_FILTER, PG_FILTER2, PG_OSC1, PG_OSC2, PG_MIXER, PG_FENV, PG_AENV, PG_LFO, PG_POLY, PG_FXA, PG_FXB, PG_SPACE,
-       PG_VOICE, PG_CLOCK, PG_ARP, PG_SEQ, PG_LFO2, PG_LSYNC, PG_SPLIT, PG_SPLIT2, PG_AT, NPAGES };
+       PG_VOICE, PG_CLOCK, PG_ARP, PG_SEQ, PG_LFO2, PG_LSYNC, PG_SPLIT, PG_SPLIT2, PG_AT, PG_DELAY, PG_DMOD, NPAGES };
 typedef struct {
     const char *title;
     uint8_t button;
@@ -292,7 +307,9 @@ static const page_t PAGES[NPAGES] = {
     [PG_SPLIT2] = {"SPLIT KEYS", B_EDIT, PG_POLY, {G_KEY, G_FOLLOW, G_LOWHOLD, G_BALANCE}},
     [PG_FXB] = {"REVERB", B_FX, PG_SPACE, {P_RV_TYPE, P_RV_MIX, P_RV_DECAY, P_RV_TONE}},
     [PG_SPACE] = {"SPACE REVERB", B_FX, PG_FXA, {P_SP_MOD, P_SP_SHIM, P_SP_SWELL, P_SP_PRE}},
-    [PG_FXA] = {"CHORUS", B_FX, PG_FXB, {P_CH_MIX, P_CH_RATE, P_CH_DEPTH, P_DIST}},
+    [PG_FXA] = {"CHORUS", B_FX, PG_DELAY, {P_CH_MIX, P_CH_RATE, P_CH_DEPTH, P_DIST}},
+    [PG_DELAY] = {"DELAY", B_FX, PG_DMOD, {P_DL_TIME_L, P_DL_TIME_R, P_DL_FB, P_DL_MIX}},
+    [PG_DMOD] = {"DELAY MOD", B_FX, PG_FXB, {P_DL_DEPTH, P_DL_RATE, P_DL_TONE, P_DL_SYNC}},
     [PG_VOICE] = {"VOICE", B_GLO, PG_AT, {P_GLIDE, P_AVEL, P_UNISON, P_BEND}},
     [PG_AT] = {"AFTERTOUCH", B_GLO, PG_CLOCK, {P_AT_DEST, P_AT_AMT, P_AT_CURVE, P_AT_SMOOTH}},
     [PG_CLOCK] = {"CLOCK", B_GLO, PG_VOICE, {G_BPM, G_SWING, G_KVEL, G_MCH}},
@@ -501,10 +518,16 @@ static int rate_sync(int code)            /* an LFO's RATE while it is synced: i
     return -1;
 }
 
+static int dl_synced(int code) { return (code == P_DL_TIME_L || code == P_DL_TIME_R) && ed.p[P_DL_SYNC]; }
+
 static void knob_text(int code, char *b)
 {
     int v = knob_get(code);
     b[0] = 0;
+    if (dl_synced(code)) {               /* synced: the note */
+        text_cat(b, DL_SYNC_NAME[v * NDLS / 128]);
+        return;
+    }
     if (rate_sync(code) >= 0) {
         param_text(rate_sync(code), ed.p[rate_sync(code)], b);
         return;
@@ -602,6 +625,13 @@ static void knob_turn(int k, int32_t e)
         int sp = rate_sync(code), sv = ed.p[sp] + (e > 0 ? 1 : -1);
         if (sv >= 1 && sv < NLSY)
             knob_put(sp, sv);
+        ui.redraw = 1;
+        return;
+    }
+    if (dl_synced(code)) {               /* synced: a detent, the next note */
+        int idx = v * NDLS / 128 + (e > 0 ? 1 : -1);
+        if (idx >= 0 && idx < NDLS)
+            knob_put(code, idx * 128 / NDLS + 5);
         ui.redraw = 1;
         return;
     }
@@ -909,11 +939,17 @@ static void pressure_input(uint32_t keys)
     if (ed.p[P_AT_DEST] == AT_OFF)
         return;
     for (k = 0; k < NKEYS; k++) {
-        uint8_t pr = (keys >> k & 1u) && key_sounding[k] >= 0 ? touch_pressure(k) : 0u;
-        int d = (int)pr - (int)prs_sent[k];
+        uint8_t pr;
+        int d;
+        if ((keys >> k & 1u) && key_sounding[k] >= 0 && touch_sensed(k) && !touch_down(k))
+            continue;                    /* lifting: its reading falls before the release; the note keeps what it had */
+        pr = (keys >> k & 1u) && key_sounding[k] >= 0 ? touch_pressure(k) : 0u;
+        d = (int)pr - (int)prs_sent[k];
         if (pr > mx)
             mx = pr;
         if (eng_arp_on())
+            continue;
+        if (key_sounding[k] < 0)         /* let go: the engine eases the pressure off with the release */
             continue;
         if (d >= 2 || d <= -2 || (pr == 0u && prs_sent[k])) {
             prs_sent[k] = pr;
@@ -1056,7 +1092,7 @@ static void held_buttons(uint32_t btn)
         set.pre[to] = ed;
         set.cur = (uint8_t)to;
         edited = 0;
-        settings_save();
+        save_now = 1;                    /* asked for: written at once, the sound faded out around it */
         app_say("SAVED", ed.name);
     }
     if (ui.home_t) {                     /* HOME held: the preset as it was saved */
@@ -1715,6 +1751,29 @@ static void page_visual(int32_t x, int32_t y, int32_t w, int32_t h)
         }
         break;
     }
+    case PG_DELAY:
+    case PG_DMOD: {                      /* the repeats, left above, right below, over 2.4 s */
+        int c, r;
+        for (c = 0; c < 2; c++) {
+            int v = ed.p[c ? P_DL_TIME_R : P_DL_TIME_L];
+            float sec = ed.p[P_DL_SYNC] ? (float)DL_SYNC_TICKS[v * NDLS / 128] * 60.0f / (24.0f * eng_bpm())
+                                        : 0.02f * fm_exp2f((float)v * (5.9069f / 127.0f));
+            float g = 1.0f, fb = 1.08f * fm_powf(u7f(ed.p[P_DL_FB]), 0.8f);
+            int32_t yb = y + (c ? h - 2 : h / 2 - 1);
+            cv_text(x + 2, yb - 11, &FONT_XS, c ? "R" : "L", K_GREY);
+            for (r = 1; r < 24; r++) {
+                int32_t px = x + 14 + (int32_t)(sec * (float)r / 2.4f * (float)(w - 20)), hh;
+                if (px > x + w - 4)
+                    break;
+                hh = (int32_t)(fm_minf(g, 1.0f) * (float)(h / 2 - 3));
+                if (hh < 1)
+                    break;
+                cv_rect(px, yb - hh, 2, hh, ed.p[P_DL_MIX] ? K_RED : K_DIM);
+                g *= fm_minf(fb, 1.0f);
+            }
+        }
+        break;
+    }
     case PG_AT: {                        /* each voice's pressure, as it reaches the sound */
         for (i = 0; i < NVOICE; i++) {
             int32_t bx = x + 14 + i * 30, hh = (int32_t)(eng_voice_press(i) * (float)(h - 6));
@@ -2050,10 +2109,27 @@ void app_frame(void)
         ui.msg_until = 0;
         ui.redraw = 1;
     }
-    if (set_dirty && now - dirty_at > 4000u && !eng_playing())   /* (a flash write hiccups the sound: not mid-song) */
-        settings_save();
-    if (seq_dirty && now - seq_dirty_at > 2500u && !eng_playing() && !ui.rec_held)
-        seq_save();
+    /* Writing the flash stops the sound for a moment (an erase: 8-17 ms with the audio held). So nothing is written
+     * while anything sounds: the settings and the sequence wait for a silence (no voice, no reverb tail, no key, the
+     * sequencer stopped) of a second and a half. Only SAVE writes at once, the sound faded out and in around it. */
+    if (eng_voices() > 0 || eng_tail() > 0.002f || eng_playing() || ui.keys || ui.rec_held)
+        silent_since = now;
+    if (save_now) {
+        eng_duck(1);
+        if (eng_ducked() || now - save_at > 60u) {
+            settings_save();
+            eng_duck(0);
+            save_now = 0;
+        }
+    } else {
+        save_at = now;
+    }
+    if (now - silent_since > 1500u) {
+        if (set_dirty && now - dirty_at > 2000u)
+            settings_save();
+        else if (seq_dirty && now - seq_dirty_at > 2000u)
+            seq_save();
+    }
     if (now - ui.drawn_at >= 33u) {      /* the LEDs, the traces, the playhead: 30 frames a second */
         ui.lfo_trace[ui.trace_w & 63u] = eng_lfo(0);
         ui.lfo2_trace[ui.trace_w & 63u] = eng_lfo(1);

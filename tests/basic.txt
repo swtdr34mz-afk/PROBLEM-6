@@ -72,6 +72,12 @@ tap FX
 expect page 11
 tap FX
 expect page 9
+tap FX
+expect page 21
+tap FX
+expect page 22
+tap FX
+expect page 10
 tap LFO
 expect page 7
 tap LFO

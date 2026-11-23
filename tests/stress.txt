@@ -519,3 +519,19 @@ key w0 down
 wait 1200
 shot load.png
 key w0 up
+# nothing is written to the flash while anything sounds (a write holds the audio): a held pad, a preset changed
+tap HOME
+turn PRESET -14
+wait 100
+key w0 down
+key w2 down
+key w4 down
+turn PRESET 1
+turn PRESET -1
+wait 8000
+expect dirty 1
+key w0 up
+key w2 up
+key w4 up
+wait 9000
+expect dirty 0

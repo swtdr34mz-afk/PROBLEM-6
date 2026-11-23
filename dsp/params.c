@@ -83,7 +83,20 @@ const param_t PARAMS[NPARAM] = {
     [P_AT_AMT] = {"AMOUNT", PK_BIPOLAR, 127, 0},
     [P_AT_CURVE] = {"CURVE", PK_BIPOLAR, 127, 0},
     [P_AT_SMOOTH] = {"SMOOTH", PK_KNOB, 127, 0},
+    [P_DL_TIME_L] = {"TIME L", PK_DTIME, 127, 0},
+    [P_DL_TIME_R] = {"TIME R", PK_DTIME, 127, 0},
+    [P_DL_FB] = {"REPEATS", PK_KNOB, 127, 0},
+    [P_DL_MIX] = {"MIX", PK_KNOB, 127, 0},
+    [P_DL_DEPTH] = {"DEPTH", PK_KNOB, 127, 0},
+    [P_DL_RATE] = {"RATE", PK_KNOB, 127, 0},
+    [P_DL_TONE] = {"TONE", PK_BIPOLAR, 127, 0},
+    [P_DL_SYNC] = {"SYNC", PK_CHOICE, NDLSYNC - 1, C_UNI},
 };
+
+/* the delay's times: 20 ms .. 1.2 s (fx.c dl_seconds); synced, the notes of the clock */
+const uint8_t DL_SYNC_TICKS[NDLS] = {3, 4, 6, 8, 9, 12, 16, 18, 24, 32, 36, 48};
+const char *const DL_SYNC_NAME[NDLS] = {"1/32", "1/16T", "1/16", "1/8T", "1/16.", "1/8", "1/4T", "1/8.", "1/4",
+                                        "1/2T", "1/4.", "1/2"};
 
 static char *put_int(char *o, int v)
 {
@@ -161,6 +174,15 @@ void param_text(int p, int v, char *o)
     case PK_TIME:
         put_time(o, v);
         return;
+    case PK_DTIME: {                     /* 20 ms * 60^(v/127) */
+        float t = 20.0f;
+        int i;
+        for (i = 0; i < v; i++)
+            t *= 1.032770f;
+        o = put_int(o, (int)(t + 0.5f));
+        put_str(o, "ms");
+        return;
+    }
     case PK_PCT:                         /* pulse width 50 .. 95 % */
         o = put_int(o, 50 + (v * 45) / 127);
         put_str(o, "%");

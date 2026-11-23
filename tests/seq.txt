@@ -48,7 +48,7 @@ wavstop
 tap PLAY
 expect playing 0
 tap REC
-wait 3000
+wait 7000
 expect seqdirty 0
 # the sequence cleared (REC held)
 press REC

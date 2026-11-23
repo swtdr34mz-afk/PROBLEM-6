@@ -37,7 +37,8 @@ static struct {
     uint8_t unison;
     float vint, spread;
     uint8_t at_dest;
-    float at_amt, at_curve, at_k;          /* AFTERTOUCH: amount -1..1, the curve's exponent, the smoothing */
+    float at_amt, at_curve, at_k, at_kr;   /* AFTERTOUCH: amount -1..1, the curve's exponent, the smoothing (held,
+                                            * and let go: never faster than 150 ms, so a release never jumps) */
 } P;
 
 /* ------------------------------------------------------------ vintage, spread --- */
@@ -228,6 +229,7 @@ void eng_patch(const uint8_t *p)
     P.at_curve = fm_exp2f(-bip(p[P_AT_CURVE]) * 1.6f);   /* - soft (early), + hard (late): x^0.33 .. x^3 */
     /* SMOOTH: how fast the pressure reaches the sound, 3 ms .. 0.4 s (per chunk of 16 samples) */
     P.at_k = 1.0f - fm_expf(-16.0f / ((0.003f + 0.4f * u7(p[P_AT_SMOOTH]) * u7(p[P_AT_SMOOTH])) * SR));
+    P.at_kr = fm_minf(P.at_k, 1.0f - fm_expf(-16.0f / (0.15f * SR)));
     s = u7(p[P_SPREAD]);
     a = u7(p[P_VINTAGE]);
     P.vint = a;                          /* VINTAGE: straight, so the middle is already clearly there */
@@ -294,7 +296,7 @@ static void voice_start(voice_t *v, int id, int note, float vel, int retrig, flo
     v->vel = vel;
     v->gain = gain;
     if (retrig)
-        v->press = v->ptgt = 0.0f;   /* a new key starts unpressed */
+        v->ptgt = 0.0f;                  /* a new key starts unpressed: what is left glides away, never jumps */
     v->n1 = rnd_f(&v->seed) * 5.0f * P.vint;   /* VINTAGE: this keystroke's own few cents and colour */
     v->n2 = rnd_f(&v->seed) * 5.0f * P.vint;
     v->ncut = rnd_f(&v->seed) * 0.12f * P.vint;
@@ -367,6 +369,15 @@ void voice_on(int id, int note, float vel)
         voice_start(&V[i], id, note, vel, 1, on_gain);
         return;
     }
+    /* the same note still ringing out: that voice again (its own character, its pressure, its filter and phase go on
+     * from where they are: no jump, no click) */
+    for (i = 0; i < NVOICE; i++)
+        if (V[i].note == note && !V[i].gate && !V[i].sus && !V[i].pend && V[i].fade >= 1.0f
+            && V[i].ae.st != ES_IDLE) {
+            rr = (uint32_t)(i + 1) % NVOICE;
+            voice_start(&V[i], id, note, vel, 1, on_gain);
+            return;
+        }
     /* a free voice, taking them in turn (so each note meets another voice's character, and a chord spreads) */
     for (i = 0; i < NVOICE; i++) {
         int k = (int)((rr + (uint32_t)i) % NVOICE);
@@ -453,6 +464,7 @@ void voice_off(int id)
         if (v->id != id || !v->gate)
             continue;
         v->gate = 0;
+        v->ptgt = 0.0f;                  /* the pressure eases off with the release (P.at_kr) */
         if (sustain) {
             v->sus = 1;
         } else {
@@ -645,7 +657,7 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
             v->pitch += (v->target - v->pitch) * P.glide_k;
             p = v->pitch + bend_v * P.bend;
             /* AFTERTOUCH: the key's pressure (or the channel's), smoothed, to where it goes */
-            v->press += (ri_maxf(v->ptgt, chan_press) - v->press) * P.at_k;
+            v->press += (ri_maxf(v->ptgt, chan_press) - v->press) * (v->gate || v->sus ? P.at_k : P.at_kr);
             pp = v->press * P.at_amt;
             switch (P.at_dest) {
             case AT_FILTER: at_cut = 4.0f * pp; break;

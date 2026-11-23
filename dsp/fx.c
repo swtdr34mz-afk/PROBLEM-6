@@ -18,6 +18,8 @@ static struct {
     uint8_t type;
     float mix, t60, damp_hz, low_hz, size, diff, mod, mod_hz, lap_g;
     float shim, swell_k, pre;
+    float dl_mix, dl_fb, dl_depth, dl_hz, dl_tk;
+    uint8_t dl_vl, dl_vr, dl_sync;
 } F;
 static uint8_t type_now = 0xFF;
 
@@ -65,6 +67,16 @@ static uint32_t sh_w;
 static float sh_d, sh_fb;
 
 static float sp_x[12];
+
+/* THE DELAY, after the Walrus Meraki (its idea, not its code): two lines, each its own time (L, R), REPEATS through a
+ * warm path (TONE's low-pass, the lows thinned, a soft saturation that lets the top end run away gently), a MOD of
+ * the times (DEPTH, RATE; the two sides a quarter apart, and a slow analogue wander), times that glide when changed
+ * (a tape's pitch bend, never a click). Like the reverb's core it runs at 22.05 kHz, its lines 16-bit: 1.2 s each */
+#define DLN 26624u
+static int16_t dl_buf[2][DLN] PLAT_POOL;
+static uint32_t dl_w;
+static float dl_d[2], dl_lp[2], dl_hp[2], dl_xp[2], dl_y[2], dl_wet[2], dl_ph, dl_wow[2], dl_wowt[2], dl_wt[2], dl_lvl;
+static uint32_t dl_seed = 0x2468ACE1u;
 static float dc_x1, dc_x2, core_l, core_r;   /* the rate change */                   /* the spring's dispersion: first-order allpasses */
 static float sw_g = 1.0f, sw_fast, sw_slow;   /* SWELL */
 static float hp_in, lp_out_l, lp_out_r, tail;
@@ -87,6 +99,8 @@ INL float soft2(float x)
 }
 
 /* ---------------------------------------------------------- the patch --- */
+static void rv_clear(void);
+
 void fx_patch(const uint8_t *p)
 {
     float d = u7(p[P_DIST]), dv = u7(p[P_RV_DECAY]), tone = bip(p[P_RV_TONE]);
@@ -105,6 +119,14 @@ void fx_patch(const uint8_t *p)
     F.ch_mix = u7(p[P_CH_MIX]);
     F.ch_hz = 0.08f * fm_exp2f((float)p[P_CH_RATE] * (6.0f / 127.0f));   /* 0.08 .. 5 Hz */
     F.ch_depth = u7(p[P_CH_DEPTH]);
+    F.dl_mix = u7(p[P_DL_MIX]);
+    F.dl_fb = 1.08f * fm_powf(u7(p[P_DL_FB]), 0.8f);   /* past 0.95 at the top: it runs away, held by the saturation */
+    F.dl_depth = u7(p[P_DL_DEPTH]) * u7(p[P_DL_DEPTH]) * 0.004f * RSR;   /* up to 4 ms */
+    F.dl_hz = 0.05f * fm_exp2f((float)p[P_DL_RATE] * (6.64f / 127.0f));   /* 0.05 .. 5 Hz */
+    F.dl_tk = 1.0f - fm_expf(-6.2831853f * 2600.0f * fm_exp2f(bip(p[P_DL_TONE]) * 1.5f) / RSR);   /* 0.9 .. 7 kHz */
+    F.dl_vl = p[P_DL_TIME_L];
+    F.dl_vr = p[P_DL_TIME_R];
+    F.dl_sync = p[P_DL_SYNC];
     F.type = t;
     F.mix = u7(p[P_RV_MIX]);
     F.t60 = T_LO[t] * fm_exp2f(dv * fm_log2f(T_HI[t] / T_LO[t]));
@@ -141,7 +163,7 @@ void fx_patch(const uint8_t *p)
             lap2_len[i] = L < LAP2MAX ? L : LAP2MAX - 1u;
         }
         type_now = t;
-        fx_clear();
+        rv_clear();                      /* (the delay's repeats go on) */
     }
     {
         int i;
@@ -153,7 +175,7 @@ void fx_patch(const uint8_t *p)
         pre_d = PREN - 2u;
 }
 
-void fx_clear(void)
+static void rv_clear(void)
 {
     uint32_t i, k;
     for (k = 0; k < NL; k++) {
@@ -174,8 +196,17 @@ void fx_clear(void)
         pre_buf[i] = 0.0f;
     for (i = 0; i < SHN; i++)
         sh_buf[i] = 0.0f;
+    sh_fb = tail = 0.0f;
+}
+
+void fx_clear(void)
+{
+    uint32_t i;
+    rv_clear();
     for (i = 0; i < CHN; i++)
         ch_l[i] = ch_r[i] = 0.0f;
+    for (i = 0; i < DLN; i++)
+        dl_buf[0][i] = dl_buf[1][i] = 0;
     for (i = 0; i < 12u; i++)
         sp_x[i] = 0.0f;
     sh_fb = tail = 0.0f;
@@ -250,6 +281,8 @@ float fx_weight(void)                    /* in voices' worth of work (measured: 
         w += 0.15f;
     if (F.ch_mix > 0.0f)
         w += 0.35f;
+    if (F.dl_mix > 0.0f)
+        w += 0.45f;
     if (F.mix > 0.0f && !rv_sleep)
         w += F.type == RV_PLATE ? 2.4f : F.type == RV_SPACE ? (F.shim > 0.0f ? 2.6f : 2.2f)
              : F.type == RV_HALL ? 1.9f : 1.5f;
@@ -274,9 +307,23 @@ void fx_process(float *l, float *r, uint32_t n)
         mod_now[k] = F.mod * 0.5f * (1.0f + fm_sin_turns(rv_mph[k])) * 0.5f + 1.0f;
     }
     mod_c++;
+    {                                    /* the delay's times (synced: the clock's notes, as it is now) */
+        int c;
+        for (c = 0; c < 2; c++) {
+            uint8_t v = c ? F.dl_vr : F.dl_vl;
+            float sec = F.dl_sync ? (float)DL_SYNC_TICKS[v * NDLS / 128u] * clock_spt() / SR
+                                  : 0.02f * fm_exp2f((float)v * (5.9069f / 127.0f));   /* 20 ms .. 1.2 s */
+            dl_wt[c] = fm_clampf(sec * RSR, 8.0f, (float)DLN - 160.0f);
+            if (dl_d[c] <= 0.0f)
+                dl_d[c] = dl_wt[c];
+        }
+    }
     blk_in = 0.0f;
     for (s = 0; s < n; s++)
         blk_in = fm_maxf(blk_in, fm_fabsf(l[s]) + fm_fabsf(r[s]));
+    if (F.dl_mix > 0.0f)                 /* the delay's repeats go into the reverb too */
+        blk_in = fm_maxf(blk_in, dl_lvl);
+    dl_lvl = 0.0f;
     if (rv_sleep && blk_in > 1e-5f)
         rv_sleep = 0;                    /* something to reverberate: awake */
     for (s = 0; s < n; s++) {
@@ -311,6 +358,55 @@ void fx_process(float *l, float *r, uint32_t n)
             ch_ph += F.ch_hz / SR;
             if (ch_ph >= 1.0f)
                 ch_ph -= 1.0f;
+        }
+        if (F.dl_mix > 0.0f) {           /* THE DELAY */
+            float in[2];
+            int c;
+            in[0] = L;
+            in[1] = R;
+            if (s & 1u) {                /* its core, every second sample */
+                dl_ph += F.dl_hz * 2.0f / SR;
+                if (dl_ph >= 1.0f)
+                    dl_ph -= 1.0f;
+                for (c = 0; c < 2; c++) {
+                    float x = 0.5f * (in[c] + dl_xp[c]), d, rp, f, y, a, b;
+                    int32_t i0, q;
+                    uint32_t j0, j1;
+                    if ((dl_w & 4095u) == (uint32_t)c * 2048u)   /* the analogue wander: a new heading now and then */
+                        dl_wowt[c] = rnd_f(&dl_seed) * 0.00015f * RSR;
+                    dl_wow[c] += (dl_wowt[c] - dl_wow[c]) * 0.0003f;   /* (gliding there: no step) */
+                    dl_d[c] += (dl_wt[c] - dl_d[c]) * 0.0006f;   /* a new time: glides there (~80 ms) */
+                    d = dl_d[c] + dl_wow[c] + F.dl_depth * (1.0f + fm_sin_turns(dl_ph + 0.25f * (float)c)) * 0.5f;
+                    rp = (float)dl_w - d;
+                    if (rp < 0.0f)
+                        rp += (float)DLN;
+                    i0 = (int32_t)rp;
+                    f = rp - (float)i0;
+                    j0 = (uint32_t)i0 % DLN;
+                    j1 = j0 + 1u >= DLN ? 0u : j0 + 1u;
+                    a = (float)dl_buf[c][j0];
+                    b = (float)dl_buf[c][j1];
+                    y = (a + (b - a) * f) * (1.0f / 16384.0f);
+                    dl_lp[c] += (y - dl_lp[c]) * F.dl_tk;   /* TONE: the repeats darken as they go */
+                    dl_hp[c] += (dl_lp[c] - dl_hp[c]) * 0.023f;   /* the lows thinned (80 Hz) */
+                    f = (dl_lp[c] - dl_hp[c]) * F.dl_fb;
+                    f = f / (1.0f + 0.25f * fm_fabsf(f));   /* warm: it rounds off as it builds up */
+                    q = (int32_t)((x + f) * 16384.0f);
+                    dl_buf[c][dl_w] = (int16_t)(q > 32767 ? 32767 : q < -32767 ? -32767 : q);
+                    dl_wet[c] = 0.5f * (dl_lp[c] + dl_y[c]);   /* (half way: the rate back up, as the reverb) */
+                    dl_y[c] = dl_lp[c];
+                    dl_lvl = fm_maxf(dl_lvl, fm_fabsf(dl_lp[c]));
+                    dl_xp[c] = in[c];
+                }
+                dl_w = dl_w + 1u >= DLN ? 0u : dl_w + 1u;
+            } else {
+                dl_xp[0] = L;
+                dl_xp[1] = R;
+                dl_wet[0] = dl_y[0];
+                dl_wet[1] = dl_y[1];
+            }
+            L = L * (1.0f - 0.45f * F.dl_mix) + dl_wet[0] * F.dl_mix * 1.1f;
+            R = R * (1.0f - 0.45f * F.dl_mix) + dl_wet[1] * F.dl_mix * 1.1f;
         }
         if (F.mix <= 0.0f || rv_sleep) {
             l[s] = L * (F.mix > 0.0f ? dry_g : 1.0f);

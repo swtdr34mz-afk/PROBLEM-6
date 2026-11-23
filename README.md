@@ -30,7 +30,8 @@ Seven voices, each with:
 - **Voice allocation**: free voices taken in turn (so each note meets another voice's character and a chord spreads
   across the stereo field), the quietest released voice next, the oldest held note last; a voice taken while it
   sounds is never cut: it fades out along a smooth curve in 4.5 ms, then plays the new note. A release runs its
-  course down to -70 dB. Sustain pedal, polyphonic GLIDE, UNISON (all seven on one note, legato,
+  course down to -70 dB. A note played again while it still rings out goes to the same voice (v0.6): its character,
+  pitch, filter and pressure go on from where they are. Sustain pedal, polyphonic GLIDE, UNISON (all seven on one note, legato,
   last-note priority, detuned by SPREAD).
 
 ## POLY MOD (EDIT)
@@ -94,13 +95,15 @@ pressure: **DEST** (FILTER opens it; SWELL louder and a little brighter; POWER b
 OFFWORLD's; VIBRATO; LFO 1 more of LFO 1; PITCH up to 2 semitones; POLY MOD deeper), **AMOUNT** (bipolar: negative
 closes, quietens, bends down), **CURVE** (soft: it answers early; hard: only a firm press), **SMOOTH** (3 ms .. 0.4 s
 for the pressure to reach the sound). Per preset; every factory preset has its own. The page shows each voice's
-pressure. The keys also play with their own velocity now (KEY VEL on CLOCK: TOUCH, or a fixed value).
+pressure. When a key is let go, its pressure eases off with the release (never faster than 150 ms); the falling
+reading of a key being lifted is ignored, so nothing dips before the release (v0.6). The keys also play with their own velocity now (KEY VEL on CLOCK: TOUCH, or a fixed value).
 
 ## The effects
 
 In the Prophet-6's order:
 
-The FX button pages through **REVERB**, **SPACE REVERB** and **CHORUS**.
+The FX button pages through **REVERB**, **SPACE REVERB**, **CHORUS**, **DELAY** and **DELAY MOD**. In the signal:
+distortion, chorus, delay, reverb (the delay's repeats go into the reverb, as pedals on a board).
 
 - **REVERB**: **ROOM, HALL, PLATE, SPRING** (dispersive, chirpy) as the Prophet-6's unit B has, and **SPACE**, an
   ambient reverb after the Meris Mercury7: long modulated lines, deep diffusion, decays up to 70 s, and held forever at
@@ -110,6 +113,12 @@ The FX button pages through **REVERB**, **SPACE REVERB** and **CHORUS**.
 - **SPACE REVERB** (used when REVERB's TYPE is SPACE): **MODULATE** (the lines' movement, from still to lush),
   **SHIMMER** (an octave up fed back into the tail), **SWELL** (after each new note the reverb fades in, as the
   Mercury7's swell) and **PREDELAY** (up to 180 ms).
+- **DELAY** (v0.6), after the Walrus Audio Meraki (its idea, not its code): a stereo delay, **TIME L** and **TIME R**
+  each its own (20 ms .. 1.2 s, or with **SYNC** the clock's notes 1/32 .. 1/2 with triplets and dotted), **REPEATS**
+  through a warm path (**TONE**'s low-pass darkening each repeat, the lows thinned, a soft saturation: at the top it
+  runs away and holds, as a pedal does), **MIX**. **DELAY MOD**: **DEPTH** and **RATE** of the times' modulation, the
+  two sides a quarter apart (wide), with a slow analogue wander underneath. A new time glides there (a tape's bend,
+  never a click). Its lines are 16-bit at 22 kHz.
 - **CHORUS**: two bucket-brigade-style lines swept by one triangle a quarter apart, their highs dulled, crossed for
   width. MIX, RATE, DEPTH; and **DISTORT**, the analogue-style stereo distortion before it, its fizz rounded off as it
   gets harder.
@@ -144,7 +153,7 @@ how ROOM, HALL, PLATE or SPRING sound.
 | ENV | FILTER ENV (A D S R); again AMP ENV |
 | LFO | LFO 1: RATE (0.05-30 Hz), AMOUNT, SHAPE (TRI, SAW, RAMP, SQUARE, S+H), DEST (FREQ 1+2, FREQ 1, FREQ 2, PW 1+2, LPF, HPF, AMP); again LFO 2 (the same); again LFO SYNC: SYNC 1, SYNC 2 (OFF, or 4 BARS .. 1/32 with triplets: locked to the clock, BPM or MIDI clock; then RATE picks the division), RETRIG 1, RETRIG 2 (a note played with no other key down starts it from the top) |
 | EDIT | POLY MOD: FILT ENV, OSC 2, OSC 1 TO, FILTER; again LOW SPLIT: SPLIT, POINT, SCALE L, SCALE R; again SPLIT KEYS: KEY, FOLLOW, LOW HOLD, BALANCE |
-| FX | REVERB: TYPE, MIX, DECAY, TONE; again SPACE REVERB: MODULATE, SHIMMER, SWELL, PREDELAY; again CHORUS: CHORUS, RATE, DEPTH, DISTORT |
+| FX | REVERB: TYPE, MIX, DECAY, TONE; again SPACE REVERB: MODULATE, SHIMMER, SWELL, PREDELAY; again CHORUS: CHORUS, RATE, DEPTH, DISTORT; again DELAY: TIME L, TIME R, REPEATS, MIX; again DELAY MOD: DEPTH, RATE, TONE, SYNC |
 | GLO | VOICE: GLIDE, VELOCITY (to the amp), UNISON, BEND (semitones); again AFTERTOUCH: DEST, AMOUNT, CURVE, SMOOTH; again CLOCK: BPM, SWING, KEY VEL (TOUCH or fixed), MIDI CH (and each core's load) |
 | ARP | the arp on and its page: MODE, RATE, OCTAVES, GATE; again: off. Held 1 s: HOLD |
 | SEQ | SEQUENCER: BARS, RATE, GATE, TRANSPOSE |
@@ -170,6 +179,11 @@ knobs with a red pointer, the voices' red LEDs (lit by each voice's amp envelope
 stereo field, the sixteen bars). POLY MOD, VOICE SPREAD, VINTAGE and the sequencer's bar stay in view on every page.
 
 ## Engineering notes and trade-offs
+
+- **Saving** (v0.6): writing the flash holds the audio for 8-17 ms (an erase). The settings and the sequence are
+  therefore written only after a second and a half of silence (no voice, no reverb tail, no key, the sequencer
+  stopped); before, a change of preset was written 4 s later even under a held chord: the dropouts. SAVE still
+  writes at once, the sound faded out and back in around it.
 
 - **CPU** (v0.4): only the voices that sound are rendered, shared out each block between the two cores so both finish
   together (the first core also runs the effects, which cost about two to three voices: `fx_weight`); one core still
