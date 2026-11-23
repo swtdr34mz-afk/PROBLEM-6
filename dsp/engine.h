@@ -101,6 +101,7 @@ uint32_t eng_notes(void);               /* notes started since the start */
 uint32_t eng_steals(void);              /* voices taken from a note still sounding */
 float eng_level(void);                  /* the output 0..1, smoothed */
 float eng_tail(void);                   /* FX B's tail level 0..1 (the screen) */
+void eng_load(uint32_t *c1, uint32_t *c2, uint32_t *c1_peak, uint32_t *c2_peak);   /* the cores' load, % (peaks: the last second) */
 float eng_lfo(int which);               /* LFO 1 (0) or 2 (1) now, -1..1 */
 
 /* ---------------------------------------------------- the clock, sequencer and arp --- */

@@ -10,6 +10,15 @@
 #define SR ENG_SR
 #define NBLK 512u                        /* frames a block at most */
 
+/* the render's hot code, in RAM (section .c1_text: copied at boot, out of the flash cache's way; both cores run it,
+ * and the two cores share one instruction cache, so code the flash would have to feed twice is fed from RAM) */
+#ifdef PLAT_HOST
+#define HOT
+#else
+#define HOT __attribute__((section(".c1_text"), noinline))
+#endif
+#define INL static inline __attribute__((always_inline))
+
 /* notes from inside the render (the sequencer, the arp): straight to the voices */
 enum { SRC_KEY = 0x000, SRC_SEQ = 0x100, SRC_ARP = 0x200 };
 void voice_on(int id, int note, float vel);
@@ -21,6 +30,7 @@ void fx_patch(const uint8_t *p);
 void fx_process(float *l, float *r, uint32_t n);
 void fx_clear(void);
 float fx_tail(void);
+float fx_weight(void);                   /* what the effects cost now, in voices (the cores' share-out) */
 
 /* the clock: one block's worth of ticks, steps and arp notes (before the voices render) */
 void clock_init(void);

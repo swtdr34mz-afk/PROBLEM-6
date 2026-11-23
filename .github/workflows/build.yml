@@ -38,6 +38,7 @@ jobs:
           python3 fm1-base/tools/build.py . --host
           build/host/prophet67_host tests/basic.txt build/host
           build/host/prophet67_host tests/seq.txt build/host
+          build/host/prophet67_host tests/stress.txt build/host
 
       - name: JieLi toolchain
         run: fm1-base/tools/get_toolchain.sh "$HOME/.jieli"

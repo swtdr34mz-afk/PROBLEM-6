@@ -13,7 +13,11 @@
 #include "core.h"
 #include "plat.h"
 
-#define CH 8u                            /* a chunk */
+#ifndef SMOOTH_K
+#define SMOOTH_K 0.25f
+#endif
+#define CH 16u                           /* a chunk (0.36 ms): pitches and coefficient targets; the coefficients
+                                          * themselves ramp per sample */
 #define HAAS 32u                         /* the spread's per-voice delay line (a power of two) */
 
 /* ------------------------------------------------------------- the patch --- */
@@ -94,7 +98,8 @@ typedef struct {
     float hbuf[HAAS];
 } voice_t;
 static voice_t V[NVOICE];
-#define STEAL 96.0f                      /* a stolen voice's fade, samples (2.2 ms) */
+#define ENV_END 3.2e-4f                  /* -70 dB: a release ends here */
+#define STEAL 200.0f                     /* a stolen voice's fade, samples (4.5 ms, a smoothstep curve) */
 
 static uint32_t notes_n, steals_n, age_n, rr;
 static uint8_t sustain;
@@ -121,10 +126,11 @@ static uint8_t lfo_reset;                /* a note asked for a RETRIG (render) *
 static float blk_mod[NBLK / CH][NLD];    /* each destination's LFO, amounts in */
 static float blk_trem[NBLK / CH];        /* AMP: the gain, 0..1 */
 /* the filter's knobs (and CC 74), as they reach the voices: a knob moves in detents, so each detent's step is spread
- * over a few milliseconds (6 ms), per chunk; the envelopes, LFOs and poly mod are never smoothed */
+ * over 2.5 ms, per chunk; the envelopes, LFOs and poly mod are never smoothed */
 static float blk_cut[NBLK / CH], blk_res[NBLK / CH], blk_env[NBLK / CH], blk_hp[NBLK / CH], blk_hpk[NBLK / CH];
 static struct {
-    float cut, res, env, hp, hpk;
+    float cut, res, env, hp, hpk;        /* the second stage (what the voices get) */
+    float c1, r1, e1, h1, k1;            /* the first */
     uint8_t init;
 } SM;
 
@@ -365,8 +371,10 @@ void voice_on(int id, int note, float vel)
     if (best < 0)
         return;
     rr = (uint32_t)(best + 1) % NVOICE;
-    if (V[best].ae.st != ES_IDLE && V[best].ae.v > 0.002f) {   /* still sounding: out quickly, then the new note */
+    if (V[best].ae.st != ES_IDLE && V[best].ae.v > ENV_END) {   /* still sounding: out smoothly, then the new note */
         V[best].pend = 1;
+        if (V[best].fade >= 1.0f)
+            V[best].fade = 0.99999f;
         V[best].pid = (int16_t)id;
         V[best].pnote = (int8_t)note;
         V[best].pvel = vel;
@@ -462,7 +470,7 @@ typedef struct {
     float wt, ws, wp, pw, dc;
 } wave_t;
 
-static inline void wave_set(wave_t *w, float shape, float pw)
+INL void wave_set(wave_t *w, float shape, float pw)
 {
     shape = fm_clampf(shape, 0.0f, 1.0f);
     w->pw = fm_clampf(pw, 0.03f, 0.97f);
@@ -478,7 +486,7 @@ static inline void wave_set(wave_t *w, float shape, float pw)
     w->dc = w->wp * (2.0f * w->pw - 1.0f);
 }
 
-static inline float wave_at(const wave_t *w, float ph)
+INL float wave_at(const wave_t *w, float ph)
 {
     float y = w->ws * (2.0f * ph - 1.0f) - w->dc;
     if (w->wt > 0.0f)
@@ -488,16 +496,11 @@ static inline float wave_at(const wave_t *w, float ph)
     return y;
 }
 
-/* a soft clip shaped like tanh, cheaper: exact at 0, within 2 % up to 3, then flat */
-static inline float sat(float x)
+/* the filter's input stage: a soft clip without a division (a cubic, flat at +-1.5 where it reaches 1) */
+INL float sat(float x)
 {
-    float x2;
-    if (x > 3.0f)
-        return 1.0f;
-    if (x < -3.0f)
-        return -1.0f;
-    x2 = x * x;
-    return x * (27.0f + x2) / (27.0f + 9.0f * x2);
+    x = fm_clampf(x, -1.5f, 1.5f);
+    return x - 0.148148f * x * x * x;
 }
 
 #define BLEP(J, d)                                                                                                      \
@@ -509,7 +512,7 @@ static inline float sat(float x)
 
 /* one sample of an oscillator. reset: hard sync, d samples ago (-1: none). wrapped: set when its phase came round
  * (and how long ago, in *wd) */
-static inline float osc_tick(osc_t *o, const wave_t *w, float inc, float reset, int *wrapped, float *wd)
+INL float osc_tick(osc_t *o, const wave_t *w, float inc, float reset, int *wrapped, float *wd)
 {
     float old = o->ph, ph = old + inc, pc = 0.0f, cc = 0.0f, cur, out;
     *wrapped = 0;
@@ -547,22 +550,56 @@ static float vb_l[2][NBLK], vb_r[2][NBLK];   /* the voices of each core, summed 
 static uint32_t blk_n;
 static uint8_t blk_fm, blk_pms, blk_pmp, blk_pml, blk_pmh;   /* poly mod by oscillator 2, per sample, to ... */
 
-static float noise_seed_f(uint32_t *s) { return rnd_f(s); }
+INL float noise_seed_f(uint32_t *s) { return rnd_f(s); }
 
-static void voices_render(int i0, int i1, float *L, float *R)
+/* The envelopes, per sample: v += (target - v) * k, capped at 1. Their stages change per chunk (env_advance): the
+ * attack aims past the top (1.3) and turns to decay at 1, the release ends at -70 dB (where nothing is heard: below
+ * that a voice only costs time) */
+INL void env_targets(const voice_t *v, float *ft, float *fk, float *at, float *ak)
+{
+    switch (v->fe.st) {
+    case ES_ATT: *ft = 1.3f; *fk = v->ka_f; break;
+    case ES_DEC: *ft = P.fs; *fk = v->kd_f; break;
+    case ES_REL: *ft = 0.0f; *fk = v->kr_f; break;
+    default: *ft = 0.0f; *fk = 0.0f;
+    }
+    switch (v->ae.st) {
+    case ES_ATT: *at = 1.3f; *ak = v->ka_a; break;
+    case ES_DEC: *at = P.as; *ak = v->kd_a; break;
+    case ES_REL: *at = 0.0f; *ak = v->kr_a; break;
+    default: *at = 0.0f; *ak = 0.0f;
+    }
+}
+
+INL void env_advance(voice_t *v)
+{
+    if (v->fe.st == ES_ATT && v->fe.v >= 0.9999f)
+        v->fe.st = ES_DEC;
+    if (v->ae.st == ES_ATT && v->ae.v >= 0.9999f)
+        v->ae.st = ES_DEC;
+    if (v->ae.st == ES_REL && v->ae.v < ENV_END) {
+        v->ae.v = v->fe.v = 0.0f;
+        v->ae.st = v->fe.st = ES_IDLE;
+    }
+}
+
+HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, float *restrict R)
 {
     uint32_t n = blk_n, c, s, k;
-    int i;
+    int j;
     for (s = 0; s < n; s++)
         L[s] = R[s] = 0.0f;
-    for (i = i0; i < i1; i++) {
+    for (j = 0; j < nv; j++) {
+        int i = list[j];
         voice_t *v = &V[i];
         if (v->ae.st == ES_IDLE && !v->pend)
             continue;
         for (c = 0; c * CH < n; c++) {
             const float *lm = blk_mod[c];
             float p, inc1, inc2, sh1, pw1, cut, hp, G, gh, kh, a1, a2, kres, comp, pm_s, pm_p, pm_l, pm_h, pm_f;
-            float vel_f, famt, hamt, fen, ug, ig, G4, drv, idrv, dG, dig, dG4, dk, dc, dgh, dkh, da1, da2;
+            float vel_f, famt, hamt, fen, ug, ig, G4, drv, idrv, dG, dig, dG4, dk, dc, dgh, dkh, da1, da2, ft, fk, at, ak;
+            int hp_on, pm_sp;
+            float m1, m2, msub, mnoise;
             wave_t w1, w2;
             int lowf = P.o2_mode == O2M_LOW || P.o2_mode == O2M_LOWFIX;
             int sync = P.o2_mode == O2M_SYNC;
@@ -682,6 +719,13 @@ static void voices_render(int i0, int i1, float *L, float *R)
             idrv = 1.0f / drv;
             ug = v->camp * blk_trem[c]
                  * (1.0f - P.avel + P.avel * v->vel);
+            hp_on = hp > 4.6f || pm_h != 0.0f;
+            pm_sp = pm_s != 0.0f || pm_p != 0.0f;
+            m1 = 0.5f * P.mix1;
+            m2 = lowf ? 0.0f : 0.5f * P.mix2;
+            msub = 0.5f * P.sub;
+            mnoise = 0.7f * P.noise;
+            env_targets(v, &ft, &fk, &at, &ak);
             for (s = 0; s < CH && c * CH + s < n; s++) {
                 float o1, o2, sub, x, u, S, y1, y2, y3, y4, t, hv1, hv2, hv3, out, rs, ae, stG;
                 int wr1, wr2;
@@ -695,47 +739,25 @@ static void voices_render(int i0, int i1, float *L, float *R)
                 kh += dkh;
                 a1 += da1;
                 a2 += da2;
-                /* the envelopes */
-                if (v->fe.st == ES_ATT) {
-                    v->fe.v += (1.3f - v->fe.v) * v->ka_f;
-                    if (v->fe.v >= 1.0f) {
-                        v->fe.v = 1.0f;
-                        v->fe.st = ES_DEC;
-                    }
-                } else if (v->fe.st == ES_DEC) {
-                    v->fe.v += (P.fs - v->fe.v) * v->kd_f;
-                } else if (v->fe.st == ES_REL) {
-                    v->fe.v -= v->fe.v * v->kr_f;
-                    if (v->fe.v < 1e-5f) {
-                        v->fe.v = 0.0f;
-                        v->fe.st = ES_IDLE;
-                    }
-                }
-                if (v->ae.st == ES_ATT) {
-                    v->ae.v += (1.3f - v->ae.v) * v->ka_a;
-                    if (v->ae.v >= 1.0f) {
-                        v->ae.v = 1.0f;
-                        v->ae.st = ES_DEC;
-                    }
-                } else if (v->ae.st == ES_DEC) {
-                    v->ae.v += (P.as - v->ae.v) * v->kd_a;
-                } else if (v->ae.st == ES_REL) {
-                    v->ae.v -= v->ae.v * v->kr_a;
-                    if (v->ae.v < 2e-5f) {
-                        v->ae.v = 0.0f;
-                        v->ae.st = ES_IDLE;
-                    }
-                }
+                /* the envelopes: one step each toward where their stage goes (set per chunk) */
+                v->fe.v = fm_minf(v->fe.v + (ft - v->fe.v) * fk, 1.0f);
+                v->ae.v = fm_minf(v->ae.v + (at - v->ae.v) * ak, 1.0f);
                 ae = v->ae.v;
-                if (v->pend) {           /* taken: fading out, then the new note */
+                if (v->fade < 1.0f) {    /* taken (or let go at once): out along a smooth curve, then silent */
                     v->fade -= 1.0f / STEAL;
                     if (v->fade <= 0.0f) {
                         v->fade = 1.0f;
-                        v->pend = 0;
                         v->fe.v = v->ae.v = 0.0f;
-                        voice_start(v, v->pid, v->pnote, v->pvel, 1);
+                        ae = 0.0f;
+                        if (v->pend) {   /* the note it was taken for */
+                            v->pend = 0;
+                            voice_start(v, v->pid, v->pnote, v->pvel, 1);
+                        } else {
+                            v->fe.st = v->ae.st = ES_IDLE;
+                        }
+                        env_targets(v, &ft, &fk, &at, &ak);
                     } else {
-                        ae *= v->fade;
+                        ae *= v->fade * v->fade * (3.0f - 2.0f * v->fade);   /* (smoothstep: no corner at either end) */
                     }
                 }
                 /* oscillator 2 first: it is poly mod's source and the sync's master */
@@ -748,7 +770,7 @@ static void voices_render(int i0, int i1, float *L, float *R)
                     if (v->o2.ph >= 1.0f)
                         v->o2.ph -= 1.0f;
                 }
-                if (pm_s != 0.0f || pm_p != 0.0f)
+                if (pm_sp)
                     wave_set(&w1, sh1 + pm_s * o2, pw1 + pm_p * o2);
                 o1 = osc_tick(&v->o1, &w1, pm_f != 0.0f ? fm_minf(inc1 * fm_exp2f(pm_f * o2), 0.45f) : inc1,
                               (sync && wr2) ? wd2 : -1.0f, &wr1, &wd1);
@@ -756,11 +778,11 @@ static void voices_render(int i0, int i1, float *L, float *R)
                     v->flip = 1.0f - v->flip;
                 t = (v->o1.ph + v->flip) * 0.5f;     /* the sub-octave: a triangle an octave down */
                 sub = 1.0f - 4.0f * fm_fabsf(t - 0.5f);
-                x = 0.5f * (P.mix1 * o1 + (lowf ? 0.0f : P.mix2 * o2) + P.sub * sub);
-                if (P.noise > 0.0f)
-                    x += P.noise * 0.7f * noise_seed_f(&v->seed);
+                x = m1 * o1 + m2 * o2 + msub * sub;
+                if (mnoise > 0.0f)
+                    x += mnoise * noise_seed_f(&v->seed);
                 /* the high-pass (2-pole, state variable) */
-                {
+                if (hp_on) {             /* (at its bottom, below 24 Hz, it is left out) */
                     float qa1 = a1, qa2 = a2, qg = gh;
                     if (pm_h != 0.0f) {  /* oscillator 2 moving it: worked out this sample */
                         qg = tan_w(3.1415927f / SR * fm_clampf(fm_exp2f(hp + pm_h * o2), 8.0f, 12000.0f));
@@ -822,6 +844,9 @@ static void voices_render(int i0, int i1, float *L, float *R)
                 }
                 v->hw++;
             }
+            env_advance(v);
+            if (v->ae.st == ES_IDLE && !v->pend && v->fade >= 1.0f)
+                break;                   /* finished: the rest of the block is silence for it */
         }
         if (v->ae.st == ES_IDLE && !v->pend)
             v->cinit = 0;                /* silent: the next note's coefficients start where it starts */
@@ -834,13 +859,18 @@ static void voices_render(int i0, int i1, float *L, float *R)
     }
 }
 
-#define SPLIT 2                          /* voices 0..1 on this core, 2..6 on the second (then the effects here: they
-                                          * weigh about as much as three voices, so the two cores finish together) */
+/* The share-out, each block: the voices sounding (only those), some here and the rest on the second core, so that
+ * both finish together: this core also runs the effects after, which cost about fx_weight() voices */
+static uint8_t act[NVOICE], act_n, act_k;
 static void job_voices(uint32_t arg)
 {
     (void)arg;
-    voices_render(SPLIT, NVOICE, vb_l[1], vb_r[1]);
+    voices_render(act + act_k, act_n - act_k, vb_l[1], vb_r[1]);
 }
+
+/* the load, measured: this core's render and the second core's share, in % of a block's time (peaks over ~1 s) */
+static uint32_t ld_c1, ld_c2, ld_c1_pk, ld_c2_pk, ld_n;
+static uint32_t ld_c1_max, ld_c2_max;
 
 static float lfo_shape_at(int k, float ph)
 {
@@ -895,7 +925,8 @@ static void lfo_block(uint32_t n)
         }
         blk_trem[c] = trem;
         {
-            const float k = 0.03f;       /* a chunk's share: 6 ms */
+            const float k = SMOOTH_K;    /* two stages, each a chunk's share: a detent's step becomes an S-curve
+                                          * (no corner to hear at its start), 90 % there in about 6 ms */
             float tc = P.cut_oct + (cc_cut >= 0 ? cutoff_oct((float)cc_cut * (255.0f / 127.0f)) - P.cut_oct : 0.0f);
             if (!SM.init) {
                 SM.cut = tc;
@@ -903,13 +934,23 @@ static void lfo_block(uint32_t n)
                 SM.env = P.env_oct;
                 SM.hp = P.hp_oct;
                 SM.hpk = P.hp_k;
+                SM.c1 = tc;
+                SM.r1 = P.res_k;
+                SM.e1 = P.env_oct;
+                SM.h1 = P.hp_oct;
+                SM.k1 = P.hp_k;
                 SM.init = 1;
             }
-            SM.cut += (tc - SM.cut) * k;
-            SM.res += (P.res_k - SM.res) * k;
-            SM.env += (P.env_oct - SM.env) * k;
-            SM.hp += (P.hp_oct - SM.hp) * k;
-            SM.hpk += (P.hp_k - SM.hpk) * k;
+            SM.c1 += (tc - SM.c1) * k;
+            SM.r1 += (P.res_k - SM.r1) * k;
+            SM.e1 += (P.env_oct - SM.e1) * k;
+            SM.h1 += (P.hp_oct - SM.h1) * k;
+            SM.k1 += (P.hp_k - SM.k1) * k;
+            SM.cut += (SM.c1 - SM.cut) * k;
+            SM.res += (SM.r1 - SM.res) * k;
+            SM.env += (SM.e1 - SM.env) * k;
+            SM.hp += (SM.h1 - SM.hp) * k;
+            SM.hpk += (SM.k1 - SM.hpk) * k;
             blk_cut[c] = SM.cut;
             blk_res[c] = SM.res;
             blk_env[c] = SM.env;
@@ -921,7 +962,7 @@ static void lfo_block(uint32_t n)
 
 void eng_render(int32_t *lr, uint32_t n, float gain)
 {
-    uint32_t s;
+    uint32_t s, t0, t1, t2;
     int on2;
     float lvl = 0.0f;
     if (n > NBLK)
@@ -955,10 +996,29 @@ void eng_render(int32_t *lr, uint32_t n, float gain)
     blk_pmp = (P.pm_dosc & PMO_PW) && P.pm_osc2 != 0.0f;
     blk_pml = (P.pm_dfilt == PMF_LPF || P.pm_dfilt == PMF_BOTH) && P.pm_osc2 != 0.0f;
     blk_pmh = (P.pm_dfilt == PMF_HPF || P.pm_dfilt == PMF_BOTH) && P.pm_osc2 != 0.0f;
-    on2 = plat_cpu2_on() && plat_cpu2_run(job_voices, 0);
-    voices_render(0, SPLIT, vb_l[0], vb_r[0]);
-    if (!on2 || plat_cpu2_wait() != 0)
-        job_voices(0);
+    {
+        int i, k;
+        act_n = 0;
+        for (i = 0; i < NVOICE; i++)
+            if (V[i].ae.st != ES_IDLE || V[i].pend)
+                act[act_n++] = (uint8_t)i;
+        k = (int)(((float)act_n - fx_weight()) * 0.5f + 0.5f);
+        act_k = (uint8_t)(k < 0 ? 0 : k > act_n ? act_n : k);
+    }
+    t0 = plat_ticks24();
+    on2 = plat_cpu2_on() && act_k < act_n && plat_cpu2_run(job_voices, 0);
+    if (!on2)
+        act_k = act_n;                   /* one core: all of them here */
+    voices_render(act, act_k, vb_l[0], vb_r[0]);
+    t1 = plat_ticks24();
+    if (on2 && plat_cpu2_wait() != 0) {
+        voices_render(act + act_k, act_n - act_k, vb_l[1], vb_r[1]);   /* (given up: done here) */
+        on2 = 0;
+    }
+    if (!on2 && act_k == act_n)
+        for (s = 0; s < n; s++)
+            vb_l[1][s] = vb_r[1][s] = 0.0f;
+    t2 = plat_ticks24();
     for (s = 0; s < n; s++) {
         vb_l[0][s] += vb_l[1][s];
         vb_r[0][s] += vb_r[1][s];
@@ -980,6 +1040,35 @@ void eng_render(int32_t *lr, uint32_t n, float gain)
         lr[2u * s + 1u] = (int32_t)(r * gain_s * duck_g);
     }
     lvl_out = lvl * 0.5f > lvl_out ? lvl * 0.5f : lvl_out * 0.97f;
+    {                                    /* the load: this core busy (less its wait); the second core's job at least
+                                          * until this core stopped waiting for it */
+        uint32_t t3 = plat_ticks24(), blk = n * 1000000u / 44100u * PLAT_TICKS_PER_US;
+        uint32_t c1 = (t1 - t0) + (t3 - t2), c2 = on2 ? t2 - t0 : 0u;
+        if (blk) {
+            c1 = c1 * 100u / blk;
+            c2 = c2 * 100u / blk;
+            ld_c1 = c1;
+            ld_c2 = c2;
+            if (c1 > ld_c1_max)
+                ld_c1_max = c1;
+            if (c2 > ld_c2_max)
+                ld_c2_max = c2;
+            if (++ld_n >= 344u) {        /* about a second */
+                ld_c1_pk = ld_c1_max;
+                ld_c2_pk = ld_c2_max;
+                ld_c1_max = ld_c2_max = 0;
+                ld_n = 0;
+            }
+        }
+    }
+}
+
+void eng_load(uint32_t *c1, uint32_t *c2, uint32_t *c1_peak, uint32_t *c2_peak)
+{
+    *c1 = ld_c1;
+    *c2 = ld_c2;
+    *c1_peak = ld_c1_pk;
+    *c2_peak = ld_c2_pk;
 }
 
 /* -------------------------------------------------------------- the calls --- */
@@ -1018,10 +1107,8 @@ void eng_overload(void)                  /* the quietest voice let go at once */
             lo = V[i].ae.v;
             q = i;
         }
-    if (q >= 0) {
-        V[q].ae.v = 0.0f;
-        V[q].ae.st = ES_IDLE;
-    }
+    if (q >= 0 && V[q].fade >= 1.0f)
+        V[q].fade = 0.99999f;            /* out along the steal's curve (4.5 ms), never cut */
 }
 
 float eng_voice_env(int v) { return v >= 0 && v < NVOICE ? V[v].ae.v : 0.0f; }

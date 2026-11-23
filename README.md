@@ -28,8 +28,9 @@ Seven voices, each with:
 - **Two ADSR envelopes** with analogue (RC) curves: attacks aim past the top and stop there (punchy), decays and
   releases fall exponentially. Times from 1 ms to 20 s. A retriggered envelope starts from where it is.
 - **Voice allocation**: free voices taken in turn (so each note meets another voice's character and a chord spreads
-  across the stereo field), the quietest released voice next, the oldest note last; a voice taken while it sounds
-  fades out in 2 ms first (no clicks). Sustain pedal, polyphonic GLIDE, UNISON (all seven on one note, legato,
+  across the stereo field), the quietest released voice next, the oldest held note last; a voice taken while it
+  sounds is never cut: it fades out along a smooth curve in 4.5 ms, then plays the new note. A release runs its
+  course down to -70 dB. Sustain pedal, polyphonic GLIDE, UNISON (all seven on one note, legato,
   last-note priority, detuned by SPREAD).
 
 ## POLY MOD (EDIT)
@@ -150,13 +151,18 @@ stereo field, the sixteen bars). POLY MOD, VOICE SPREAD, VINTAGE and the sequenc
 
 ## Engineering notes and trade-offs
 
-- **CPU** (v0.1 measured 71-76 % on the heaviest presets): two voices and the effects on the first core, five voices on the second (`cpu2`); one core still works
-  (`cpu2_fallback`). The oscillators and filters run per sample; pitches and cutoffs per 8 samples, except where
+- **CPU** (v0.4): only the voices that sound are rendered, shared out each block between the two cores so both finish
+  together (the first core also runs the effects, which cost about two to three voices: `fx_weight`); one core still
+  works (`cpu2_fallback`). The voices and effects run from RAM (`.c1_text`), out of the flash cache's way. A release
+  ends at -70 dB. The reverb's core runs at 22 kHz (it keeps nothing above 10 kHz), and sleeps when it has faded
+  away. No division per sample in a voice. The CLOCK page shows each core's load and its peak over the last second
+  (C2: at most this). Against v0.3, 31-33 % fewer instructions with seven voices in long releases. The oscillators and filters run per sample; pitches and cutoffs per 8 samples, except where
   oscillator 2 modulates them through poly mod (then per sample). If a render runs late, the quietest released voice is
   let go. The CLOCK page shows the load: please check it with heavy presets (PM GROWL, GLASS PAD, SPACE DRIFT with
   seven notes).
 - **The filter moves continuously** (v0.3). CUTOFF has 256 steps (half a semitone a detent, 20 Hz to 20 kHz). Each
-  knob detent (and CC 74) reaches the filter spread over about 6 ms, and every filter coefficient then ramps sample by
+  knob detent (and CC 74) reaches the filter along a short S-curve (90 % in about 6 ms, more than twice as fast as v0.3), a quick turn
+  sweeps the whole range in a flick, and every filter coefficient then ramps sample by
   sample from where it was, so neither knob steps nor the 8-sample control rate are heard. The filter envelope, the
   LFOs and poly mod are not smoothed: they act at once (poly mod by oscillator 2 per sample). Measured on a held
   note during a knob sweep: the sharpness of each detent's change 11-27 dB lower than v0.2.

@@ -27,8 +27,13 @@ static float ch_l[CHN] PLAT_POOL, ch_r[CHN] PLAT_POOL;
 static uint32_t ch_w;
 static float ch_ph, ch_lpl, ch_lpr;
 
+/* The reverb's core (diffusers, lines, shimmer) runs at half the rate, 22.05 kHz, as the classic digital reverbs
+ * did: everything it keeps is below 10 kHz anyway (its damping), and it costs half. Its input is decimated (a 3-tap
+ * half-band), its output interpolated, then rounded off. The predelay, the spring's dispersion and the swell run at
+ * the full rate. Lengths below are in the core's samples. */
+#define RSR (SR * 0.5f)
 #define NL 8
-#define LMAX 4400u                       /* a line at most (100 ms) */
+#define LMAX 2200u                       /* a line at most (100 ms) */
 static float rv_line[NL][LMAX] PLAT_POOL;
 static uint32_t rv_len[NL], rv_w[NL];
 static float rv_lp[NL], rv_g[NL], rv_mph[NL];
@@ -36,15 +41,15 @@ static const uint16_t LBASE[NL] = {1557, 1617, 1491, 1422, 1277, 1356, 1188, 111
 static const float LMHZ[NL] = {0.31f, 0.43f, 0.37f, 0.53f, 0.29f, 0.47f, 0.41f, 0.59f};
 
 #define NAP 4
-#define APMAX 1100u
+#define APMAX 560u
 static float ap_buf[NAP][APMAX] PLAT_POOL;
 static uint32_t ap_len[NAP], ap_w[NAP];
 static const uint16_t APBASE[NAP] = {142, 107, 379, 277};
 
 /* inside the loop, one allpass per line: every echo smeared into many, so no single mode rings (a plate's density,
  * a hall's smoothness) */
-#define LAPMAX 640u
-#define LAP2MAX 384u
+#define LAPMAX 320u
+#define LAP2MAX 192u
 static float lap_buf[NL][LAPMAX] PLAT_POOL, lap2_buf[NL][LAP2MAX] PLAT_POOL;
 static uint32_t lap_len[NL], lap_w[NL], lap2_len[NL], lap2_w[NL];
 static const uint16_t LAPBASE[NL] = {113, 149, 173, 197, 223, 251, 277, 307};
@@ -54,12 +59,13 @@ static const uint16_t LAP2BASE[NL] = {67, 41, 89, 53, 97, 61, 79, 47};
 static float pre_buf[PREN] PLAT_POOL;
 static uint32_t pre_w, pre_d;
 
-#define SHN 4096u                        /* the shimmer's pitch shifter */
+#define SHN 2048u                        /* the shimmer's pitch shifter */
 static float sh_buf[SHN] PLAT_POOL;
 static uint32_t sh_w;
 static float sh_d, sh_fb;
 
-static float sp_x[12];                   /* the spring's dispersion: first-order allpasses */
+static float sp_x[12];
+static float dc_x1, dc_x2, core_l, core_r;   /* the rate change */                   /* the spring's dispersion: first-order allpasses */
 static float sw_g = 1.0f, sw_fast, sw_slow;   /* SWELL */
 static float hp_in, lp_out_l, lp_out_r, tail;
 static float dist_lpl, dist_lpr;
@@ -67,7 +73,7 @@ static uint32_t mod_c;
 
 /* the lines' safety: unity for the levels a reverb lives at, rounding off above 1 and never past 2 (a held SPACE
  * fed again and again stays bounded) */
-static inline float soft2(float x)
+INL float soft2(float x)
 {
     float h = x * 0.5f, h2;
     if (x < 0.8f && x > -0.8f)           /* (nearly always: as it is) */
@@ -119,19 +125,19 @@ void fx_patch(const uint8_t *p)
     if (t != type_now) {                 /* a new type: its line lengths (the render clears the lines) */
         int i;
         for (i = 0; i < NL; i++) {
-            uint32_t L = (uint32_t)((float)LBASE[i] * F.size);
-            if (L > LMAX - 40u)
-                L = LMAX - 40u;
+            uint32_t L = (uint32_t)((float)LBASE[i] * F.size * 0.5f);
+            if (L > LMAX - 20u)
+                L = LMAX - 20u;
             rv_len[i] = L;
         }
         for (i = 0; i < NAP; i++) {
-            uint32_t L = (uint32_t)((float)APBASE[i] * (t == RV_SPACE ? 2.4f : t == RV_PLATE ? 1.7f : 1.0f));
+            uint32_t L = (uint32_t)((float)APBASE[i] * 0.5f * (t == RV_SPACE ? 2.4f : t == RV_PLATE ? 1.7f : 1.0f));
             ap_len[i] = L < APMAX ? L : APMAX - 1u;
         }
         for (i = 0; i < NL; i++) {
-            uint32_t L = (uint32_t)((float)LAPBASE[i] * LAPS[t]);
+            uint32_t L = (uint32_t)((float)LAPBASE[i] * 0.5f * LAPS[t]);
             lap_len[i] = L < LAPMAX ? L : LAPMAX - 1u;
-            L = (uint32_t)((float)LAP2BASE[i] * LAPS[t]);
+            L = (uint32_t)((float)LAP2BASE[i] * 0.5f * LAPS[t]);
             lap2_len[i] = L < LAP2MAX ? L : LAP2MAX - 1u;
         }
         type_now = t;
@@ -140,7 +146,7 @@ void fx_patch(const uint8_t *p)
     {
         int i;
         for (i = 0; i < NL; i++)         /* each line loses 60 dB in T60 */
-            rv_g[i] = fm_exp2f(-9.965784f * (float)rv_len[i] / (F.t60 * SR));
+            rv_g[i] = fm_exp2f(-9.965784f * (float)rv_len[i] / (F.t60 * RSR));
     }
     pre_d = (uint32_t)(F.pre * SR);
     if (pre_d > PREN - 2u)
@@ -186,7 +192,7 @@ void fx_init(void)
 float fx_tail(void) { return tail; }
 
 /* ----------------------------------------------------------- the pieces --- */
-static inline float rd_frac(const float *b, uint32_t mask_or_len, uint32_t w, float d, int pow2)
+INL float rd_frac(const float *b, uint32_t mask_or_len, uint32_t w, float d, int pow2)
 {
     float rp = (float)w - d;
     int32_t i;
@@ -211,9 +217,9 @@ static inline float rd_frac(const float *b, uint32_t mask_or_len, uint32_t w, fl
 }
 
 /* the shimmer: an octave up, two heads sliding through a window, crossfaded */
-static float shimmer(float x)
+INL float shimmer(float x)
 {
-    const float D = 2400.0f;
+    const float D = 1200.0f;
     float d2, w1, w2, y;
     sh_buf[sh_w & (SHN - 1u)] = x;
     sh_d -= 1.0f;                         /* an octave up: the delay shrinks a sample a sample */
@@ -230,10 +236,29 @@ static float shimmer(float x)
 }
 
 /* ------------------------------------------------------------- the block --- */
-void fx_process(float *l, float *r, uint32_t n)
+/* the reverb asleep: nothing going in and its tail gone below -100 dB for a second; it wakes with the next sound
+ * (a held SPACE at DECAY 127 never sleeps) */
+static uint8_t rv_sleep;
+static uint32_t rv_quiet;
+static float blk_in;
+
+float fx_weight(void)                    /* in voices' worth of work (measured: engine.c's share-out uses it) */
+{
+    float w = 0.15f;
+    if (F.dist > 0.0f)
+        w += 0.15f;
+    if (F.ch_mix > 0.0f)
+        w += 0.35f;
+    if (F.mix > 0.0f && !rv_sleep)
+        w += F.type == RV_PLATE ? 2.4f : F.type == RV_SPACE ? (F.shim > 0.0f ? 2.6f : 2.2f)
+             : F.type == RV_HALL ? 1.9f : 1.5f;
+    return w;
+}
+
+HOT void fx_process(float *l, float *r, uint32_t n)
 {
     uint32_t s, k;
-    float kd = 1.0f - fm_expf(-6.2831853f * fm_minf(F.damp_hz, 18000.0f) / SR);
+    float kd = 1.0f - fm_expf(-6.2831853f * fm_minf(F.damp_hz, 9500.0f) / RSR);
     float kl = 1.0f - fm_expf(-6.2831853f * F.low_hz / SR);
     float kdist = 1.0f - fm_expf(-6.2831853f * 9000.0f / SR);
     float ch_k = 1.0f - fm_expf(-6.2831853f * 7500.0f / SR);
@@ -245,9 +270,14 @@ void fx_process(float *l, float *r, uint32_t n)
         rv_mph[k] += LMHZ[k] * F.mod_hz * (float)n / SR;
         if (rv_mph[k] >= 1.0f)
             rv_mph[k] -= 1.0f;
-        mod_now[k] = F.mod * (1.0f + fm_sin_turns(rv_mph[k])) * 0.5f + 1.0f;
+        mod_now[k] = F.mod * 0.5f * (1.0f + fm_sin_turns(rv_mph[k])) * 0.5f + 1.0f;
     }
     mod_c++;
+    blk_in = 0.0f;
+    for (s = 0; s < n; s++)
+        blk_in = fm_maxf(blk_in, fm_fabsf(l[s]) + fm_fabsf(r[s]));
+    if (rv_sleep && blk_in > 1e-5f)
+        rv_sleep = 0;                    /* something to reverberate: awake */
     for (s = 0; s < n; s++) {
         float L = l[s], R = r[s], x, sum, out_l, out_r, fb[NL];
         /* the analogue distortion */
@@ -281,9 +311,9 @@ void fx_process(float *l, float *r, uint32_t n)
             if (ch_ph >= 1.0f)
                 ch_ph -= 1.0f;
         }
-        if (F.mix <= 0.0f) {
-            l[s] = L;
-            r[s] = R;
+        if (F.mix <= 0.0f || rv_sleep) {
+            l[s] = L * (F.mix > 0.0f ? dry_g : 1.0f);
+            r[s] = R * (F.mix > 0.0f ? dry_g : 1.0f);
             continue;
         }
         /* FX B: the reverb's input: mono, the lows cut, predelayed */
@@ -309,6 +339,22 @@ void fx_process(float *l, float *r, uint32_t n)
                 x = y;
             }
         }
+        /* down to the core's rate: a half-band of three taps over this sample and the two before; the core runs on
+         * every second sample, the output in between interpolated */
+        {
+            float xd = 0.25f * (x + dc_x2) + 0.5f * dc_x1;
+            dc_x2 = dc_x1;
+            dc_x1 = x;
+            if (!(s & 1u)) {
+                lp_out_l += (core_l - lp_out_l) * 0.75f;   /* the core's latest */
+                lp_out_r += (core_r - lp_out_r) * 0.75f;
+                tl = fm_maxf(tl, fm_fabsf(lp_out_l) + fm_fabsf(lp_out_r));
+                l[s] = L * dry_g + lp_out_l * wet_g;
+                r[s] = R * dry_g + lp_out_r * wet_g;
+                continue;
+            }
+            x = xd;
+        }
         for (k = 0; k < NAP; k++) {      /* diffusion: a burst of echoes into a wash */
             uint32_t ri = ap_w[k] >= ap_len[k] ? ap_w[k] - ap_len[k] : ap_w[k] + APMAX - ap_len[k];
             float dly = ap_buf[k][ri], v = x + F.diff * dly;
@@ -326,7 +372,7 @@ void fx_process(float *l, float *r, uint32_t n)
             if (F.lap_g > 0.0f) {        /* the line's own diffusion */
                 uint32_t ri = lap_w[k] >= lap_len[k] ? lap_w[k] - lap_len[k] : lap_w[k] + LAPMAX - lap_len[k];
                 float dly = lap_buf[k][ri], v = y + F.lap_g * dly;
-                lap_buf[k][lap_w[k]] = flush_dn(v);
+                lap_buf[k][lap_w[k]] = v;
                 y = dly - F.lap_g * v;
                 lap_w[k] = lap_w[k] + 1u >= LAPMAX ? 0u : lap_w[k] + 1u;
                 if (F.type != RV_PLATE)  /* (a second stage: the plate's density; the others are smooth without) */
@@ -334,7 +380,7 @@ void fx_process(float *l, float *r, uint32_t n)
                 ri = lap2_w[k] >= lap2_len[k] ? lap2_w[k] - lap2_len[k] : lap2_w[k] + LAP2MAX - lap2_len[k];
                 dly = lap2_buf[k][ri];
                 v = y - F.lap_g * dly;   /* (the other sign: the two together colour nothing) */
-                lap2_buf[k][lap2_w[k]] = flush_dn(v);
+                lap2_buf[k][lap2_w[k]] = v;
                 y = dly + F.lap_g * v;
                 lap2_w[k] = lap2_w[k] + 1u >= LAP2MAX ? 0u : lap2_w[k] + 1u;
             }
@@ -347,7 +393,7 @@ void fx_process(float *l, float *r, uint32_t n)
         out_r = fb[1] - fb[3] + fb[5] - fb[7] + 0.5f * (fb[2] + fb[6]);
         for (k = 0; k < NL; k++) {
             float in = (k & 1u) ? -x : x;
-            rv_line[k][rv_w[k]] = flush_dn(soft2(fb[k] - sum + in * 0.35f));
+            rv_line[k][rv_w[k]] = soft2(fb[k] - sum + in * 0.35f);
             rv_w[k] = rv_w[k] + 1u >= LMAX ? 0u : rv_w[k] + 1u;
         }
         out_l *= 0.42f;
@@ -356,13 +402,22 @@ void fx_process(float *l, float *r, uint32_t n)
             sh_fb = shimmer((out_l + out_r) * 0.5f) * F.shim;
         else
             sh_fb = 0.0f;
-        lp_out_l += (out_l - lp_out_l) * 0.6f;
-        lp_out_r += (out_r - lp_out_r) * 0.6f;
+        lp_out_l += (0.5f * (out_l + core_l) - lp_out_l) * 0.75f;   /* half way from the last to this (a half
+                                                                      * sample late: linear interpolation) */
+        lp_out_r += (0.5f * (out_r + core_r) - lp_out_r) * 0.75f;
+        core_l = out_l;
+        core_r = out_r;
         tl = fm_maxf(tl, fm_fabsf(lp_out_l) + fm_fabsf(lp_out_r));
         l[s] = L * dry_g + lp_out_l * wet_g;
         r[s] = R * dry_g + lp_out_r * wet_g;
     }
     tail = tl > tail ? tl : tail * 0.98f;
+    if (F.mix > 0.0f && !rv_sleep && tail < 1e-5f && blk_in < 1e-5f) {   /* going quiet */
+        if (++rv_quiet > 344u)
+            rv_sleep = 1;                /* (what is left in its lines is below -100 dB: it wakes from that) */
+    } else {
+        rv_quiet = 0;
+    }
     for (k = 0; k < NL; k++)
         rv_lp[k] = flush_dn(rv_lp[k]);
     hp_in = flush_dn(hp_in);

@@ -484,6 +484,20 @@ static int32_t accel(int enc, int32_t e)
     return e;
 }
 
+/* CUTOFF's 256 steps: slowly half a semitone a detent (precise), a quick turn sweeps the whole range in a flick */
+static int32_t accel_fine(int enc, int32_t e)
+{
+    uint32_t now = plat_ms(), dt = now - ui.enc_at[enc];
+    ui.enc_at[enc] = now;
+    if (dt < 30u)
+        return e * 10;
+    if (dt < 55u)
+        return e * 6;
+    if (dt < 100u)
+        return e * 3;
+    return e;
+}
+
 static void knob_turn(int k, int32_t e)
 {
     int code = PAGES[ui.page].k[k], v = knob_get(code), mx = knob_max(code), mn = knob_min(code), nv;
@@ -496,7 +510,7 @@ static void knob_turn(int k, int32_t e)
         return;
     }
     if (!knob_choice(code))
-        e = accel(EN_K1 + k, e);
+        e = mx > 127 ? accel_fine(EN_K1 + k, e) : accel(EN_K1 + k, e);
     nv = v + (int)e;
     if (knob_centred(code)) {            /* across the centre: it stops there for a few detents */
         if (v == 64 && ui.rest[k] > 0) {
@@ -1340,12 +1354,23 @@ static void page_visual(int32_t x, int32_t y, int32_t w, int32_t h)
     case PG_CLOCK:
         int_text((int32_t)(eng_bpm() + 0.5f), t);
         cv_text(x + 10, y + 1, &FONT_L, t, K_CREAM);
-        cv_text(x + 12 + text_w(&FONT_L, t), y + 14, &FONT_B, eng_clock_ext() ? "BPM EXT" : "BPM", K_RED);
-        t[0] = 0;                        /* the load (for testing on the FM-1) */
-        text_cat(t, "CPU ");
-        int_text((int32_t)plat_cpu_pct(), t + 4);
-        text_cat(t, "%");
-        cv_text(x + w - 70, y + 14, &FONT_B, t, K_GREY);
+        cv_text(x + 12 + text_w(&FONT_L, t), y + 14, &FONT_B, eng_clock_ext() ? "EXT" : "BPM", K_RED);
+        {                                /* the load of each core, now and its peak in the last second */
+            uint32_t c1, c2, p1, p2;
+            eng_load(&c1, &c2, &p1, &p2);
+            t[0] = 0;
+            text_cat(t, "C1 ");
+            int_text((int32_t)c1, t + text_len_(t));
+            text_cat(t, "% PK ");
+            int_text((int32_t)p1, t + text_len_(t));
+            cv_text(x + w - 92, y + 1, &FONT_XS, t, p1 >= 85u ? K_RED : K_GREY);
+            t[0] = 0;
+            text_cat(t, "C2 ");
+            int_text((int32_t)c2, t + text_len_(t));
+            text_cat(t, "% PK ");
+            int_text((int32_t)p2, t + text_len_(t));
+            cv_text(x + w - 92, y + 13, &FONT_XS, t, p2 >= 85u ? K_RED : K_GREY);
+        }
         break;
     case PG_ARP: {
         int n = eng_arp_note();
