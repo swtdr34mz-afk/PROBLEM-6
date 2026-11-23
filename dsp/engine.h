@@ -39,6 +39,8 @@ enum {
     P_SP_MOD, P_SP_SHIM, P_SP_SWELL, P_SP_PRE,         /* SPACE */
     P_GLIDE, P_AVEL, P_UNISON, P_BEND,                 /* VOICE */
     P_VINTAGE, P_SPREAD,                               /* SELECT, ALGORITHM */
+    P_L2_RATE, P_L2_AMT, P_L2_SHAPE, P_L2_DEST,        /* LFO 2 (v0.2: added after, so older presets load) */
+    P_L1_SYNC, P_L2_SYNC, P_L1_RETRIG, P_L2_RETRIG,    /* LFO SYNC */
     NPARAM
 };
 typedef struct {
@@ -57,6 +59,8 @@ enum { O2M_NORMAL, O2M_SYNC, O2M_LOW, O2M_LOWFIX, NO2M };      /* oscillator 2: 
 enum { KT_OFF, KT_HALF, KT_FULL, NKT };
 enum { LS_TRI, LS_SAW, LS_RAMP, LS_SQUARE, LS_SH, NLS };
 enum { LD_FREQ, LD_FREQ1, LD_FREQ2, LD_PW, LD_LPF, LD_HPF, LD_AMP, NLD };
+enum { LSY_OFF, LSY_4BAR, LSY_2BAR, LSY_1BAR, LSY_2, LSY_4, LSY_4T, LSY_8, LSY_8T, LSY_16, LSY_16T, LSY_32, NLSY };
+extern const uint16_t LSY_TICKS[NLSY];   /* a cycle, in clock ticks (24 a quarter) */
 #define PMO_FREQ 1u                    /* poly mod's oscillator destinations, a mask (the choice's value) */
 #define PMO_SHAPE 2u
 #define PMO_PW 4u
@@ -97,7 +101,7 @@ uint32_t eng_notes(void);               /* notes started since the start */
 uint32_t eng_steals(void);              /* voices taken from a note still sounding */
 float eng_level(void);                  /* the output 0..1, smoothed */
 float eng_tail(void);                   /* FX B's tail level 0..1 (the screen) */
-float eng_lfo(void);                    /* the LFO now -1..1 */
+float eng_lfo(int which);               /* LFO 1 (0) or 2 (1) now, -1..1 */
 
 /* ---------------------------------------------------- the clock, sequencer and arp --- */
 /* A 24-per-quarter clock runs in the render: from BPM, or MIDI clock coming in. The sequencer and the arp step on it,

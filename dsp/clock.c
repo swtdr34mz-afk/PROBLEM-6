@@ -73,6 +73,12 @@ void clock_panic(void)
 }
 
 static float spt_now(void) { return eng_clock_ext() && ext_spt > 0.0f ? ext_spt : spt; }
+float clock_spt(void) { return spt_now(); }
+float clock_pos(void)
+{
+    float f = eng_clock_ext() && ext_spt > 0.0f ? since_ext / ext_spt : acc / spt;
+    return (float)ticks + fm_minf(f, 0.999f);
+}
 
 /* a step of the sequencer: its notes on (a TIE holds the notes before) */
 static void seq_fire(int st)

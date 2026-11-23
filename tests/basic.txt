@@ -66,14 +66,31 @@ tap EDIT
 expect page 8
 shot polymod.png
 tap FX
-expect page 9
-tap FX
 expect page 10
 shot reverb.png
 tap FX
 expect page 11
+tap FX
+expect page 9
 tap LFO
 expect page 7
+tap LFO
+expect page 16
+shot lfo2.png
+tap LFO
+expect page 17
+# LFO 1 synced to the clock: RATE then picks the division
+turn K1 7
+wait 50
+expect k1 7
+tap LFO
+expect page 7
+turn K1 -1
+wait 50
+shot lfosync.png
+tap LFO
+tap LFO
+expect k1 6
 tap GLO
 expect page 12
 shot voice.png

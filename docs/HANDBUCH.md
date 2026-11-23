@@ -15,9 +15,9 @@ eigene Gefahr.
 | HOME | FILTER: CUTOFF, RESONANCE, ENV AMT, HP CUTOFF; nochmal FILTER 2: HP RESO, KEYBOARD, VELOCITY, HP ENV. 1 s halten: Preset wie gespeichert |
 | SEL | OSC 1: FREQ, SHAPE, PW, SUB OCT; nochmal OSC 2: FREQ, FINE, SHAPE, PW; nochmal MIXER: OSC 1, OSC 2, NOISE, OSC-2-Modus (NORMAL, SYNC, LOW FRQ, LF FIXED) |
 | ENV | FILTER ENV (ADSR); nochmal AMP ENV |
-| LFO | RATE, AMOUNT, SHAPE, DEST |
+| LFO | LFO 1: RATE, AMOUNT, SHAPE, DEST; nochmal LFO 2; nochmal LFO SYNC: SYNC 1, SYNC 2 (OFF oder 4 BARS … 1/32 zum Takt – dann wählt RATE den Notenwert), RETRIG 1, RETRIG 2 (neuer Ton ohne gehaltene Taste startet das LFO von vorn) |
 | EDIT | POLY MOD: FILT ENV und OSC 2 (bipolar) auf OSC 1 (FREQ, SHAPE, PW) und FILTER (LPF, HPF) |
-| FX | FX A: CHORUS, RATE, DEPTH, DISTORT; nochmal FX B: TYPE (ROOM, HALL, PLATE, SPRING, SPACE), MIX, DECAY, TONE; nochmal SPACE: MODULATE, SHIMMER, SWELL, PREDELAY |
+| FX | REVERB: TYPE (ROOM, HALL, PLATE, SPRING, SPACE), MIX, DECAY, TONE; nochmal SPACE REVERB: MODULATE, SHIMMER, SWELL, PREDELAY; nochmal CHORUS: CHORUS, RATE, DEPTH, DISTORT |
 | GLO | VOICE: GLIDE, VELOCITY, UNISON, BEND; nochmal CLOCK: BPM, SWING, KEY VEL, MIDI CH (dort auch die CPU-Last) |
 | ARP | Arp an + Seite (MODE, RATE, OCTAVES, GATE); nochmal: aus. 1 s halten: HOLD |
 | SEQ | SEQUENCER: BARS (1-16), RATE, GATE, TRANSPOSE |
@@ -37,8 +37,10 @@ eigene Gefahr.
 - **POLY MOD** wie beim Prophet: Filterhüllkurve und Oszillator 2 (auch im Audiobereich: FM, Filter-FM) modulieren
   Tonhöhe, Wellenform und Pulsbreite von Oszillator 1 und die Filter. Mit OSC 2 auf LOW FRQ wird Oszillator 2 zum
   LFO pro Stimme. Probier PM BELLS, SYNC LEAD, PM GROWL, GLASS PAD.
-- **VINTAGE** (SELECT): 0 = sieben identische Stimmen; hoch = jede Stimme mit eigener Stimmung, Drift, Filter,
-  Hüllkurven und Lautstärke – fest pro Stimme, nicht zufällig, damit Akkorde stimmig bleiben.
+- **VINTAGE** (SELECT): 0 = sieben identische Stimmen; ab der Mitte deutlich hörbar, ganz oben ein alter Prophet:
+  pro Stimme eigene Stimmung (bis etwa ±12/±15 Cent je Oszillator, dazu Drift und ein paar Cent pro Anschlag),
+  Filter (±0,6 Oktaven), Resonanz, Hüllkurvenzeiten (±55 %), Lautstärke (±3 dB), Wellenform und Filter-Sättigung –
+  fest pro Stimme, nicht zufällig, damit Akkorde stimmig bleiben.
 - **SPREAD** (ALGORITHM): die Stimmen von Mono zu breitem Stereo, mit etwas eigener Verstimmung und Farbe pro Stimme.
 
 ## MIDI

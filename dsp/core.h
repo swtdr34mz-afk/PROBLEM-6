@@ -26,6 +26,8 @@ float fx_tail(void);
 void clock_init(void);
 void clock_block(uint32_t n);
 void clock_panic(void);
+float clock_pos(void);                   /* where the clock is now, in ticks (with the fraction of the one running) */
+float clock_spt(void);                   /* samples a tick now */
 
 /* small helpers */
 static inline float hz_of(float midi) { return 440.0f * fm_exp2f((midi - 69.0f) * (1.0f / 12.0f)); }

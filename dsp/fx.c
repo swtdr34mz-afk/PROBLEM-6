@@ -16,7 +16,7 @@ static struct {
     float dist, dist_g, dist_c;          /* DISTORT: amount, drive, level after */
     float ch_mix, ch_hz, ch_depth;
     uint8_t type;
-    float mix, t60, damp_hz, low_hz, size, diff, mod, mod_hz;
+    float mix, t60, damp_hz, low_hz, size, diff, mod, mod_hz, lap_g;
     float shim, swell_k, pre;
 } F;
 static uint8_t type_now = 0xFF;
@@ -41,6 +41,15 @@ static float ap_buf[NAP][APMAX] PLAT_POOL;
 static uint32_t ap_len[NAP], ap_w[NAP];
 static const uint16_t APBASE[NAP] = {142, 107, 379, 277};
 
+/* inside the loop, one allpass per line: every echo smeared into many, so no single mode rings (a plate's density,
+ * a hall's smoothness) */
+#define LAPMAX 640u
+#define LAP2MAX 384u
+static float lap_buf[NL][LAPMAX] PLAT_POOL, lap2_buf[NL][LAP2MAX] PLAT_POOL;
+static uint32_t lap_len[NL], lap_w[NL], lap2_len[NL], lap2_w[NL];
+static const uint16_t LAPBASE[NL] = {113, 149, 173, 197, 223, 251, 277, 307};
+static const uint16_t LAP2BASE[NL] = {67, 41, 89, 53, 97, 61, 79, 47};
+
 #define PREN 8192u                       /* predelay: up to 185 ms */
 static float pre_buf[PREN] PLAT_POOL;
 static uint32_t pre_w, pre_d;
@@ -61,6 +70,8 @@ static uint32_t mod_c;
 static inline float soft2(float x)
 {
     float h = x * 0.5f, h2;
+    if (x < 0.8f && x > -0.8f)           /* (nearly always: as it is) */
+        return x;
     if (h > 3.0f)
         return 2.0f;
     if (h < -3.0f)
@@ -74,10 +85,12 @@ void fx_patch(const uint8_t *p)
 {
     float d = u7(p[P_DIST]), dv = u7(p[P_RV_DECAY]), tone = bip(p[P_RV_TONE]);
     static const float T_LO[NRV] = {0.25f, 0.9f, 0.5f, 0.7f, 2.0f}, T_HI[NRV] = {2.5f, 9.0f, 6.0f, 4.0f, 70.0f};
-    static const float SIZE[NRV] = {0.42f, 1.0f, 0.62f, 0.38f, 2.6f};
-    static const float DIFF[NRV] = {0.62f, 0.68f, 0.78f, 0.45f, 0.72f};
-    static const float DAMP[NRV] = {5200.0f, 6000.0f, 9500.0f, 4200.0f, 7000.0f};
-    static const float LOWC[NRV] = {120.0f, 80.0f, 90.0f, 220.0f, 60.0f};
+    static const float SIZE[NRV] = {0.42f, 1.0f, 0.85f, 0.38f, 2.6f};
+    static const float DIFF[NRV] = {0.62f, 0.68f, 0.62f, 0.45f, 0.72f};
+    static const float DAMP[NRV] = {5200.0f, 6000.0f, 5800.0f, 4200.0f, 7000.0f};
+    static const float LOWC[NRV] = {120.0f, 80.0f, 110.0f, 220.0f, 60.0f};
+    static const float LAPG[NRV] = {0.0f, 0.45f, 0.65f, 0.0f, 0.5f};    /* the in-loop diffusion */
+    static const float LAPS[NRV] = {1.0f, 1.0f, 1.8f, 1.0f, 1.6f};
     static const float PRE[NRV] = {0.004f, 0.022f, 0.008f, 0.0f, 0.0f};
     uint8_t t = p[P_RV_TYPE] < NRV ? p[P_RV_TYPE] : RV_HALL;
     F.dist = d;
@@ -97,7 +110,8 @@ void fx_patch(const uint8_t *p)
     F.low_hz = LOWC[t] * fm_exp2f(-tone * 0.8f);
     F.size = SIZE[t];
     F.diff = DIFF[t];
-    F.mod = t == RV_SPACE ? 2.0f + 22.0f * u7(p[P_SP_MOD]) : t == RV_HALL ? 3.0f : t == RV_PLATE ? 1.5f : 0.6f;
+    F.mod = t == RV_SPACE ? 2.0f + 22.0f * u7(p[P_SP_MOD]) : t == RV_HALL ? 3.0f : t == RV_PLATE ? 12.0f : 0.6f;
+    F.lap_g = LAPG[t];
     F.mod_hz = t == RV_SPACE ? 0.25f + 1.2f * u7(p[P_SP_MOD]) : 0.5f;
     F.shim = t == RV_SPACE ? u7(p[P_SP_SHIM]) * 0.45f : 0.0f;
     F.swell_k = t == RV_SPACE && p[P_SP_SWELL] ? k_of(0.03f + 3.0f * u7(p[P_SP_SWELL]) * u7(p[P_SP_SWELL])) : 1.0f;
@@ -111,8 +125,14 @@ void fx_patch(const uint8_t *p)
             rv_len[i] = L;
         }
         for (i = 0; i < NAP; i++) {
-            uint32_t L = (uint32_t)((float)APBASE[i] * (t == RV_SPACE ? 2.4f : t == RV_PLATE ? 1.3f : 1.0f));
+            uint32_t L = (uint32_t)((float)APBASE[i] * (t == RV_SPACE ? 2.4f : t == RV_PLATE ? 1.7f : 1.0f));
             ap_len[i] = L < APMAX ? L : APMAX - 1u;
+        }
+        for (i = 0; i < NL; i++) {
+            uint32_t L = (uint32_t)((float)LAPBASE[i] * LAPS[t]);
+            lap_len[i] = L < LAPMAX ? L : LAPMAX - 1u;
+            L = (uint32_t)((float)LAP2BASE[i] * LAPS[t]);
+            lap2_len[i] = L < LAP2MAX ? L : LAP2MAX - 1u;
         }
         type_now = t;
         fx_clear();
@@ -138,6 +158,12 @@ void fx_clear(void)
     for (k = 0; k < NAP; k++)
         for (i = 0; i < APMAX; i++)
             ap_buf[k][i] = 0.0f;
+    for (k = 0; k < NL; k++) {
+        for (i = 0; i < LAPMAX; i++)
+            lap_buf[k][i] = 0.0f;
+        for (i = 0; i < LAP2MAX; i++)
+            lap2_buf[k][i] = 0.0f;
+    }
     for (i = 0; i < PREN; i++)
         pre_buf[i] = 0.0f;
     for (i = 0; i < SHN; i++)
@@ -296,7 +322,24 @@ void fx_process(float *l, float *r, uint32_t n)
             float d = (float)rv_len[k] - mod_now[k], y;
             y = rd_frac(rv_line[k], LMAX, rv_w[k], d, 0);
             rv_lp[k] += (y - rv_lp[k]) * kd;
-            fb[k] = rv_lp[k] * rv_g[k];
+            y = rv_lp[k];
+            if (F.lap_g > 0.0f) {        /* the line's own diffusion */
+                uint32_t ri = lap_w[k] >= lap_len[k] ? lap_w[k] - lap_len[k] : lap_w[k] + LAPMAX - lap_len[k];
+                float dly = lap_buf[k][ri], v = y + F.lap_g * dly;
+                lap_buf[k][lap_w[k]] = flush_dn(v);
+                y = dly - F.lap_g * v;
+                lap_w[k] = lap_w[k] + 1u >= LAPMAX ? 0u : lap_w[k] + 1u;
+                if (F.type != RV_PLATE)  /* (a second stage: the plate's density; the others are smooth without) */
+                    goto lap_done;
+                ri = lap2_w[k] >= lap2_len[k] ? lap2_w[k] - lap2_len[k] : lap2_w[k] + LAP2MAX - lap2_len[k];
+                dly = lap2_buf[k][ri];
+                v = y - F.lap_g * dly;   /* (the other sign: the two together colour nothing) */
+                lap2_buf[k][lap2_w[k]] = flush_dn(v);
+                y = dly + F.lap_g * v;
+                lap2_w[k] = lap2_w[k] + 1u >= LAP2MAX ? 0u : lap2_w[k] + 1u;
+            }
+        lap_done:
+            fb[k] = y * rv_g[k];
             sum += fb[k];
         }
         sum *= 0.25f;                    /* 2 / N */

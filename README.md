@@ -49,14 +49,16 @@ PM GROWL and GLASS PAD.
 Each voice has its own fixed character, as the voices of a well-aged poly do: tuning of each oscillator, a slow
 drift, the cutoff, the resonance, the envelopes' attack, decay and release times, the level, the pulse width, the
 shape. The offsets are **hand-set, not random**: every column averages near zero and no voice is extreme in
-everything, so a chord stays in tune with itself and none sticks out. VINTAGE scales them all together on a curve that
-is gentle at first:
+everything, so a chord stays in tune with itself and none sticks out. VINTAGE scales them all together, from 0 straight up (v0.2: much stronger than v0.1):
 
 | VINTAGE | What you hear |
 | --- | --- |
 | 0 | seven identical, perfectly stable voices |
-| 30-60 | a living poly: a few cents apart, filters and envelopes slightly different per voice |
-| 127 | an old Prophet: about ±7 cents per oscillator plus a slow ±4.5 cent drift, cutoff ±0.3 octave, envelope times ±30 %, levels ±1.5 dB |
+| 64 | a living poly: voices up to about ±10 cents apart, audibly brighter and darker voices, envelopes and levels differing |
+| 127 | an old Prophet: each oscillator up to ±12 / ±15 cents (a voice's two oscillators beat against each other), a slow ±10 cent drift, a few cents more per keystroke, cutoff ±0.6 octave, resonance ±40 %, envelope times ±55 %, levels ±3 dB, wave shape and width, and how hard each voice drives its filter |
+
+Measured on one note played seven times (each on the next voice) at VINTAGE 127: pitches spread over about ±20 cents,
+brightness from 335 to 620 Hz, levels over 5 dB. At 0 all seven are the same to the cent.
 
 ## VOICE SPREAD (ALGORITHM)
 
@@ -65,19 +67,31 @@ chord land on opposite sides), a few cents of detune of its own, a slightly diff
 away from it a fraction of a millisecond of delay, which gives width without a chorus's wobble. Measured on a 5-note
 chord: L/R correlation 1.00 at 0, 0.96 at 42, 0.84 at 84, 0.49 at 127. With UNISON it also sets the stack's detune.
 
+## Two LFOs
+
+LFO 1 and LFO 2, each with its own RATE, AMOUNT, SHAPE and DEST; both may go to the same place (they add). The mod
+wheel (CC 1) adds to LFO 1. **SYNC** locks an LFO to the clock: its phase is the clock's position, so it stays on
+the beat and starts with the sequencer; RATE then steps through 4 BARS, 2 BARS, 1 BAR, 1/2, 1/4, 1/4T, 1/8, 1/8T,
+1/16, 1/16T, 1/32. **RETRIG** starts it from the top on a fresh note. SWEEP PAD has LFO 1 on the filter over 2 bars,
+PM GROWL a stepped LFO 2 at 1/16.
+
 ## The effects
 
 In the Prophet-6's order:
 
-- **DISTORT** (FX A page): the analogue-style stereo distortion, its fizz rounded off as it gets harder.
-- **FX A, CHORUS**: two bucket-brigade-style lines swept by one triangle a quarter apart, their highs dulled, crossed
-  for width. MIX, RATE, DEPTH.
-- **FX B, REVERB**: **ROOM, HALL, PLATE, SPRING** (dispersive, chirpy) as the Prophet-6's unit B has, and **SPACE**,
-  an ambient reverb after the Meris Mercury7: long modulated lines, deep diffusion, decays up to 70 s, and held
-  forever at DECAY 127. MIX, DECAY, TONE (darker / brighter).
-- **SPACE page** (FX pressed a third time; used when FX B's TYPE is SPACE): **MODULATE** (the lines' movement, from
-  still to lush), **SHIMMER** (an octave up fed back into the tail), **SWELL** (after each new note the reverb fades
-  in, as the Mercury7's swell) and **PREDELAY** (up to 180 ms).
+The FX button pages through **REVERB**, **SPACE REVERB** and **CHORUS**.
+
+- **REVERB**: **ROOM, HALL, PLATE, SPRING** (dispersive, chirpy) as the Prophet-6's unit B has, and **SPACE**, an
+  ambient reverb after the Meris Mercury7: long modulated lines, deep diffusion, decays up to 70 s, and held forever at
+  DECAY 127. MIX, DECAY, TONE (darker / brighter). The **PLATE** (v0.2) is dense and smooth: two allpass diffusers
+  inside every line of the loop and a slow wobble smear its modes so nothing rings metallic, and it is warmer at the
+  top (its persistent ringing measured down from 4.2 to 2.8 dB).
+- **SPACE REVERB** (used when REVERB's TYPE is SPACE): **MODULATE** (the lines' movement, from still to lush),
+  **SHIMMER** (an octave up fed back into the tail), **SWELL** (after each new note the reverb fades in, as the
+  Mercury7's swell) and **PREDELAY** (up to 180 ms).
+- **CHORUS**: two bucket-brigade-style lines swept by one triangle a quarter apart, their highs dulled, crossed for
+  width. MIX, RATE, DEPTH; and **DISTORT**, the analogue-style stereo distortion before it, its fizz rounded off as it
+  gets harder.
 
 One reverb runs at a time; the SPACE algorithm has its own line lengths, diffusion and modulation, so it never changes
 how ROOM, HALL, PLATE or SPRING sound.
@@ -107,9 +121,9 @@ how ROOM, HALL, PLATE or SPRING sound.
 | HOME | FILTER: CUTOFF, RESONANCE, ENV AMT, HP CUTOFF; again FILTER 2: HP RESO, KEYBOARD, VELOCITY, HP ENV. Held 1 s: the preset as saved |
 | SEL | OSC 1: FREQ, SHAPE, PW, SUB OCT; again OSC 2: FREQ, FINE, SHAPE, PW; again MIXER: OSC 1, OSC 2, NOISE, OSC 2 mode |
 | ENV | FILTER ENV (A D S R); again AMP ENV |
-| LFO | LFO: RATE (0.05-30 Hz), AMOUNT, SHAPE (TRI, SAW, RAMP, SQUARE, S+H), DEST (FREQ 1+2, FREQ 1, FREQ 2, PW 1+2, LPF, HPF, AMP) |
+| LFO | LFO 1: RATE (0.05-30 Hz), AMOUNT, SHAPE (TRI, SAW, RAMP, SQUARE, S+H), DEST (FREQ 1+2, FREQ 1, FREQ 2, PW 1+2, LPF, HPF, AMP); again LFO 2 (the same); again LFO SYNC: SYNC 1, SYNC 2 (OFF, or 4 BARS .. 1/32 with triplets: locked to the clock, BPM or MIDI clock; then RATE picks the division), RETRIG 1, RETRIG 2 (a note played with no other key down starts it from the top) |
 | EDIT | POLY MOD: FILT ENV, OSC 2, OSC 1 TO, FILTER |
-| FX | FX A: CHORUS, RATE, DEPTH, DISTORT; again FX B: TYPE, MIX, DECAY, TONE; again SPACE: MODULATE, SHIMMER, SWELL, PREDELAY |
+| FX | REVERB: TYPE, MIX, DECAY, TONE; again SPACE REVERB: MODULATE, SHIMMER, SWELL, PREDELAY; again CHORUS: CHORUS, RATE, DEPTH, DISTORT |
 | GLO | VOICE: GLIDE, VELOCITY (to the amp), UNISON, BEND (semitones); again CLOCK: BPM, SWING, KEY VEL, MIDI CH (and the CPU load) |
 | ARP | the arp on and its page: MODE, RATE, OCTAVES, GATE; again: off. Held 1 s: HOLD |
 | SEQ | SEQUENCER: BARS, RATE, GATE, TRANSPOSE |
@@ -136,7 +150,7 @@ stereo field, the sixteen bars). POLY MOD, VOICE SPREAD, VINTAGE and the sequenc
 
 ## Engineering notes and trade-offs
 
-- **CPU**: three voices and the effects on the first core, four voices on the second (`cpu2`); one core still works
+- **CPU** (v0.1 measured 71-76 % on the heaviest presets): two voices and the effects on the first core, five voices on the second (`cpu2`); one core still works
   (`cpu2_fallback`). The oscillators and filters run per sample; pitches and cutoffs per 8 samples, except where
   oscillator 2 modulates them through poly mod (then per sample). If a render runs late, the quietest released voice is
   let go. The CLOCK page shows the load: please check it with heavy presets (PM GROWL, GLASS PAD, SPACE DRIFT with
@@ -145,7 +159,7 @@ stereo field, the sixteen bars). POLY MOD, VOICE SPREAD, VINTAGE and the sequenc
   saturation is gentle. 2x oversampling would double the voice cost; left out to keep seven voices on the FM-1.
 - **The SPACE reverb** is an original algorithm in the spirit of the Mercury7, not a copy. Its lines are bounded by a
   soft limiter, so a held SPACE fed again and again stays stable; with SHIMMER on, DECAY stops at 30 s.
-- **Not modelled**: the Prophet-6's aftertouch routing, LFO sync to the clock, the BBD and digital
+- **Not modelled**: the Prophet-6's aftertouch routing, the BBD and digital
   delays and phasers of FX A, polychain. The keys of the FM-1 send a fixed velocity (KEY VEL); MIDI notes bring theirs.
 
 ## Building

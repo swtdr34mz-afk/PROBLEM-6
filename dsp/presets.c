@@ -9,7 +9,8 @@
 
 /*                 O1 FRQ SHP PW SUB   O2 FRQ FIN SHP PW   MIX O1 O2 NOI MODE   CUT RES ENV HPF   HPR KEY FVEL HPE
  *                 FA FD FS FR   AA AD AS AR   LFO RATE AMT SHP DST   PM FENV OSC2 DOSC DFLT   CH MIX RATE DPTH DIST
- *                 RV TYP MIX DEC TONE   SP MOD SHIM SWL PRE   GLIDE AVEL UNI BEND   VINTAGE SPREAD */
+ *                 RV TYP MIX DEC TONE   SP MOD SHIM SWL PRE   GLIDE AVEL UNI BEND   VINTAGE SPREAD
+ *                 (then, where a preset uses them: LFO 2 RATE AMT SHP DST   SYNC 1 SYNC 2 RETRIG 1 RETRIG 2) */
 const patch_t FACTORY[NPRESETS] = {
     /* the classic: two saws a little apart, slow and warm, wide */
     {"POLY PAD", {24, 64, 0, 20, 24, 72, 64, 0, 110, 100, 0, O2M_NORMAL, 60, 22, 84, 0, 0, KT_HALF, 30, 64,
@@ -38,11 +39,11 @@ const patch_t FACTORY[NPRESETS] = {
     /* a pulse breathing (the LFO on its width) and a saw, the chorus deep: strings */
     {"STRINGS", {24, 127, 60, 0, 24, 72, 64, 0, 105, 95, 0, O2M_NORMAL, 72, 10, 70, 30, 0, KT_HALF, 20, 64,
                  80, 80, 90, 90, 86, 90, 116, 92, 76, 22, LS_TRI, LD_PW, 64, 64, 0, PMF_OFF, 90, 40, 80, 0,
-                 RV_HALL, 35, 72, 64, 30, 0, 0, 20, 0, 30, 0, 2, 55, 100}},
+                 RV_HALL, 35, 72, 64, 30, 0, 0, 20, 0, 30, 0, 2, 55, 100, 70, 12, LS_TRI, LD_FREQ, LSY_OFF, LSY_OFF, 0, 0}},
     /* a resonant sweep, slow up and slower down, the LFO turning the filter */
     {"SWEEP PAD", {24, 64, 0, 10, 24, 74, 64, 0, 110, 105, 0, O2M_NORMAL, 35, 72, 92, 0, 0, KT_HALF, 20, 64,
                    108, 110, 40, 100, 96, 100, 120, 100, 24, 30, LS_TRI, LD_LPF, 64, 64, 0, PMF_OFF, 40, 30, 60, 0,
-                   RV_HALL, 50, 92, 60, 30, 0, 0, 20, 0, 30, 0, 2, 62, 110}},
+                   RV_HALL, 50, 92, 60, 30, 0, 0, 20, 0, 30, 0, 2, 62, 110, 0, 0, LS_TRI, LD_FREQ, LSY_2BAR, LSY_OFF, 0, 0}},
     /* a short pluck, resonant, harder hits brighter */
     {"PLUCK", {24, 64, 0, 0, 24, 70, 127, 20, 115, 80, 0, O2M_NORMAL, 40, 46, 106, 0, 0, KT_FULL, 85, 64,
                0, 60, 0, 60, 0, 76, 0, 70, 40, 0, LS_TRI, LD_FREQ, 64, 64, 0, PMF_OFF, 20, 30, 50, 0,
@@ -50,11 +51,11 @@ const patch_t FACTORY[NPRESETS] = {
     /* oscillator 2 slowed to an LFO (LOW FREQ, with the keys) moving oscillator 1's shape and the filter: a growl */
     {"PM GROWL", {24, 64, 40, 30, 36, 64, 0, 0, 120, 0, 0, O2M_LOW, 55, 56, 86, 0, 0, KT_HALF, 40, 64,
                   0, 80, 50, 50, 0, 80, 116, 46, 60, 0, LS_TRI, LD_FREQ, 64, 100, PMO_SHAPE, PMF_LPF, 0, 30, 50, 30,
-                  RV_ROOM, 20, 50, 64, 30, 0, 0, 20, 0, 40, 0, 2, 30, 30}},
+                  RV_ROOM, 20, 50, 64, 30, 0, 0, 20, 0, 40, 0, 2, 30, 30, 0, 40, LS_SH, LD_LPF, LSY_OFF, LSY_16, 0, 1}},
     /* the SPACE reverb: swelling, shimmering, endless */
     {"SPACE DRIFT", {24, 40, 0, 0, 36, 66, 0, 0, 92, 62, 0, O2M_NORMAL, 58, 24, 76, 10, 0, KT_HALF, 20, 64,
                      100, 104, 62, 104, 100, 104, 116, 108, 20, 10, LS_TRI, LD_FREQ, 64, 64, 0, PMF_OFF, 30, 25, 60, 0,
-                     RV_SPACE, 70, 112, 70, 70, 50, 60, 30, 0, 30, 0, 2, 50, 120}},
+                     RV_SPACE, 70, 112, 70, 70, 50, 60, 30, 0, 30, 0, 2, 50, 120, 20, 30, LS_TRI, LD_LPF, LSY_OFF, LSY_OFF, 0, 0}},
     /* every voice on one note, spread wide, a saw an octave up: the big lead */
     {"UNISON LEAD", {24, 64, 0, 30, 36, 68, 64, 0, 120, 90, 0, O2M_NORMAL, 75, 34, 86, 0, 0, KT_FULL, 40, 64,
                      0, 70, 60, 50, 0, 80, 120, 48, 72, 0, LS_TRI, LD_FREQ, 64, 64, 0, PMF_OFF, 0, 30, 50, 30,

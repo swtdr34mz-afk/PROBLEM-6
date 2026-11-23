@@ -15,10 +15,11 @@
  *   SEL             OSC 1 (FREQ, SHAPE, PW, SUB OCT), again OSC 2 (FREQ, FINE, SHAPE, PW), again MIXER (OSC 1, OSC 2,
  *                   NOISE, OSC 2 mode: NORMAL, SYNC, LOW FREQ, LF FIXED)
  *   ENV             FILTER ENV (ADSR), again AMP ENV
- *   LFO             LFO (RATE, AMOUNT, SHAPE, DEST)
+ *   LFO             LFO 1 (RATE, AMOUNT, SHAPE, DEST), again LFO 2, again LFO SYNC (SYNC 1, SYNC 2: OFF or 4 BARS ..
+ *                   1/32 to the clock, where RATE then picks the division; RETRIG 1, RETRIG 2)
  *   EDIT            POLY MOD (FILT ENV and OSC 2 amounts, bipolar; OSC 1 TO: FREQ, SHAPE, PW; FILTER: LPF, HPF)
- *   FX              FX A: CHORUS (MIX, RATE, DEPTH, DISTORT); again FX B: REVERB (TYPE, MIX, DECAY, TONE); again
- *                   SPACE (the SPACE reverb's MODULATE, SHIMMER, SWELL, PREDELAY)
+ *   FX              REVERB (TYPE, MIX, DECAY, TONE); again SPACE REVERB (MODULATE, SHIMMER, SWELL, PREDELAY);
+ *                   again CHORUS (MIX, RATE, DEPTH, DISTORT)
  *   GLO             VOICE (GLIDE, VELOCITY, UNISON, BEND); again CLOCK (BPM, SWING, KEY VEL, MIDI CH)
  *   ARP             the arp on, and its page (MODE, RATE, OCTAVES, GATE); again: off. Held 1 s: HOLD
  *   SEQ             SEQUENCER page (BARS, RATE, GATE, TRANSPOSE)
@@ -32,7 +33,9 @@
 #include "engine.h"
 
 /* ----------------------------------------------------------------- settings --- */
-#define SET_MAGIC 0x31374850u            /* "PH71": the settings record; another: the factory presets */
+#define SET_MAGIC 0x32374850u            /* "PH72": the settings record (v0.2: LFO 2, LFO SYNC) */
+#define SET_MAGIC_V1 0x31374850u         /* "PH71": v0.1's, carried over */
+#define NPARAM_V1 54
 #define SEQ_MAGIC 0x51534850u            /* "PHSQ" */
 typedef struct {
     uint32_t magic;
@@ -53,6 +56,21 @@ typedef struct {
 } seqrec_t;
 _Static_assert(sizeof(seqrec_t) <= PLAT_STORE_MAX, "the sequence outgrew a store object");
 
+typedef struct {                         /* v0.1's record: its presets had NPARAM_V1 parameters */
+    uint32_t magic;
+    struct {
+        char name[NAME_LEN];
+        uint8_t p[NPARAM_V1];
+    } pre[NPRESETS];
+    uint8_t cur;
+    int8_t oct;
+    uint16_t bpm;
+    uint8_t swing, kvel, mch;
+    uint8_t arp_mode, arp_rate, arp_oct, arp_gate, arp_hold;
+    uint8_t seq_bars, seq_rate, seq_gate;
+    int8_t seq_tr;
+    uint8_t rsv[3];
+} settings_v1_t;
 static settings_t set;
 static seqrec_t sq;
 static patch_t ed;                       /* the preset as edited (what sounds) */
@@ -118,9 +136,45 @@ static int settings_ok(void)
     return 1;
 }
 
+static int settings_v1(void)             /* v0.1's settings: the presets kept, the new parameters at their start */
+{
+    static settings_v1_t o;
+    uint32_t i, k;
+    if (plat_store_load(OBJ_SETTINGS, &o, sizeof o) != (int)sizeof o || o.magic != SET_MAGIC_V1)
+        return 0;
+    settings_defaults();
+    for (i = 0; i < NPRESETS; i++) {
+        for (k = 0; k < NAME_LEN; k++)
+            set.pre[i].name[k] = o.pre[i].name[k];
+        for (k = 0; k < NPARAM; k++)
+            set.pre[i].p[k] = k < NPARAM_V1 ? o.pre[i].p[k] : 0;
+    }
+    set.cur = o.cur;
+    set.oct = o.oct;
+    set.bpm = o.bpm;
+    set.swing = o.swing;
+    set.kvel = o.kvel;
+    set.mch = o.mch;
+    set.arp_mode = o.arp_mode;
+    set.arp_rate = o.arp_rate;
+    set.arp_oct = o.arp_oct;
+    set.arp_gate = o.arp_gate;
+    set.arp_hold = o.arp_hold;
+    set.seq_bars = o.seq_bars;
+    set.seq_rate = o.seq_rate;
+    set.seq_gate = o.seq_gate;
+    set.seq_tr = o.seq_tr;
+    if (!settings_ok()) {
+        settings_defaults();
+        return 0;
+    }
+    set_dirty = 1;                       /* (kept in the new form soon) */
+    return 1;
+}
+
 static void settings_load(void)
 {
-    if (plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || !settings_ok())
+    if ((plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || !settings_ok()) && !settings_v1())
         settings_defaults();
     if (plat_store_load(OBJ_SEQ, &sq, sizeof sq) != (int)sizeof sq || sq.magic != SEQ_MAGIC) {
         memset(&sq, 0, sizeof sq);
@@ -165,7 +219,7 @@ static void preset_load(int i)
 enum { G_BPM = 0x100, G_SWING, G_KVEL, G_MCH, G_ARP_MODE, G_ARP_RATE, G_ARP_OCT, G_ARP_GATE, G_SEQ_BARS, G_SEQ_RATE,
        G_SEQ_GATE, G_SEQ_TR };
 enum { PG_FILTER, PG_FILTER2, PG_OSC1, PG_OSC2, PG_MIXER, PG_FENV, PG_AENV, PG_LFO, PG_POLY, PG_FXA, PG_FXB, PG_SPACE,
-       PG_VOICE, PG_CLOCK, PG_ARP, PG_SEQ, NPAGES };
+       PG_VOICE, PG_CLOCK, PG_ARP, PG_SEQ, PG_LFO2, PG_LSYNC, NPAGES };
 typedef struct {
     const char *title;
     uint8_t button;
@@ -180,11 +234,13 @@ static const page_t PAGES[NPAGES] = {
     [PG_MIXER] = {"MIXER", B_SEL, PG_OSC1, {P_MIX_O1, P_MIX_O2, P_NOISE, P_O2_MODE}},
     [PG_FENV] = {"FILTER ENV", B_ENV, PG_AENV, {P_FA, P_FD, P_FS, P_FR}},
     [PG_AENV] = {"AMP ENV", B_ENV, PG_FENV, {P_AA, P_AD, P_AS, P_AR}},
-    [PG_LFO] = {"LFO", B_LFO, PG_LFO, {P_LFO_RATE, P_LFO_AMT, P_LFO_SHAPE, P_LFO_DEST}},
+    [PG_LFO] = {"LFO 1", B_LFO, PG_LFO2, {P_LFO_RATE, P_LFO_AMT, P_LFO_SHAPE, P_LFO_DEST}},
+    [PG_LFO2] = {"LFO 2", B_LFO, PG_LSYNC, {P_L2_RATE, P_L2_AMT, P_L2_SHAPE, P_L2_DEST}},
+    [PG_LSYNC] = {"LFO SYNC", B_LFO, PG_LFO, {P_L1_SYNC, P_L2_SYNC, P_L1_RETRIG, P_L2_RETRIG}},
     [PG_POLY] = {"POLY MOD", B_EDIT, PG_POLY, {P_PM_FENV, P_PM_OSC2, P_PM_DOSC, P_PM_DFILT}},
-    [PG_FXA] = {"FX A  CHORUS", B_FX, PG_FXB, {P_CH_MIX, P_CH_RATE, P_CH_DEPTH, P_DIST}},
-    [PG_FXB] = {"FX B  REVERB", B_FX, PG_SPACE, {P_RV_TYPE, P_RV_MIX, P_RV_DECAY, P_RV_TONE}},
-    [PG_SPACE] = {"SPACE", B_FX, PG_FXA, {P_SP_MOD, P_SP_SHIM, P_SP_SWELL, P_SP_PRE}},
+    [PG_FXB] = {"REVERB", B_FX, PG_SPACE, {P_RV_TYPE, P_RV_MIX, P_RV_DECAY, P_RV_TONE}},
+    [PG_SPACE] = {"SPACE REVERB", B_FX, PG_FXA, {P_SP_MOD, P_SP_SHIM, P_SP_SWELL, P_SP_PRE}},
+    [PG_FXA] = {"CHORUS", B_FX, PG_FXB, {P_CH_MIX, P_CH_RATE, P_CH_DEPTH, P_DIST}},
     [PG_VOICE] = {"VOICE", B_GLO, PG_CLOCK, {P_GLIDE, P_AVEL, P_UNISON, P_BEND}},
     [PG_CLOCK] = {"CLOCK", B_GLO, PG_VOICE, {G_BPM, G_SWING, G_KVEL, G_MCH}},
     [PG_ARP] = {"ARPEGGIATOR", B_ARP, PG_ARP, {G_ARP_MODE, G_ARP_RATE, G_ARP_OCT, G_ARP_GATE}},
@@ -212,7 +268,7 @@ static struct {
     uint32_t drawn_at;
     int8_t intro;
     uint32_t intro_at;
-    float lfo_trace[64];
+    float lfo_trace[64], lfo2_trace[64];
     float tail_trace[64];
     uint8_t trace_w;
 } ui;
@@ -351,10 +407,23 @@ static const char *knob_name(int code)
                                     "RATE", "GATE", "TRANSPOSE"};
     return code < NPARAM ? PARAMS[code].name : G[code - G_BPM];
 }
+static int rate_sync(int code)            /* an LFO's RATE while it is synced: its SYNC parameter (else -1) */
+{
+    if (code == P_LFO_RATE && ed.p[P_L1_SYNC])
+        return P_L1_SYNC;
+    if (code == P_L2_RATE && ed.p[P_L2_SYNC])
+        return P_L2_SYNC;
+    return -1;
+}
+
 static void knob_text(int code, char *b)
 {
     int v = knob_get(code);
     b[0] = 0;
+    if (rate_sync(code) >= 0) {
+        param_text(rate_sync(code), ed.p[rate_sync(code)], b);
+        return;
+    }
     if (code < NPARAM) {
         param_text(code, v, b);
         return;
@@ -409,6 +478,13 @@ static void knob_turn(int k, int32_t e)
 {
     int code = PAGES[ui.page].k[k], v = knob_get(code), mx = knob_max(code), mn = knob_min(code), nv;
     char t[16];
+    if (rate_sync(code) >= 0) {          /* synced: RATE walks the divisions (never back to OFF) */
+        int sp = rate_sync(code), sv = ed.p[sp] + (e > 0 ? 1 : -1);
+        if (sv >= 1 && sv < NLSY)
+            knob_put(sp, sv);
+        ui.redraw = 1;
+        return;
+    }
     if (!knob_choice(code))
         e = accel(EN_K1 + k, e);
     nv = v + (int)e;
@@ -624,7 +700,7 @@ static void button(uint32_t i)
         /* fall through */
     case B_SEL: case B_ENV: case B_LFO: case B_EDIT: case B_FX: case B_GLO: case B_SEQ: {
         static const uint8_t FIRST[NB] = {[B_HOME] = PG_FILTER, [B_SEL] = PG_OSC1, [B_ENV] = PG_FENV,
-                                          [B_LFO] = PG_LFO, [B_EDIT] = PG_POLY, [B_FX] = PG_FXA,
+                                          [B_LFO] = PG_LFO, [B_EDIT] = PG_POLY, [B_FX] = PG_FXB,
                                           [B_GLO] = PG_VOICE, [B_SEQ] = PG_SEQ};
         if (pg->button == i)
             page_set(pg->next);
@@ -1174,7 +1250,21 @@ static void page_visual(int32_t x, int32_t y, int32_t w, int32_t h)
     case PG_AENV:
         adsr_draw(x + 8, y + 3, w - 16, h - 6, &ed.p[P_AA], K_CREAM);
         break;
+    case PG_LFO2:
+        trace_draw(ui.lfo2_trace, x + 8, y + 2, w - 16, h - 4, K_CREAM);
+        if (ed.p[P_L2_SYNC])
+            cv_text(x + w - 40, y - 14, &FONT_XS, "SYNC", K_RED);
+        break;
+    case PG_LSYNC:
+        trace_draw(ui.lfo_trace, x + 8, y + 2, w - 16, h - 4, K_CREAM);
+        trace_draw(ui.lfo2_trace, x + 8, y + 2, w - 16, h - 4, K_RED);
+        cv_text(x + 8, y + 1, &FONT_XS, "1", K_CREAM);
+        cv_text(x + 18, y + 1, &FONT_XS, "2", K_RED);
+        break;
     case PG_LFO:
+        if (ed.p[P_L1_SYNC])
+            cv_text(x + w - 40, y - 14, &FONT_XS, "SYNC", K_RED);
+        /* fall through */
     case PG_FXA:
         trace_draw(ui.lfo_trace, x + 8, y + 2, w - 16, h - 4, ui.page == PG_LFO ? K_CREAM : K_RED);
         if (ui.page == PG_FXA) {         /* the chorus: two sweeps a quarter apart */
@@ -1221,7 +1311,7 @@ static void page_visual(int32_t x, int32_t y, int32_t w, int32_t h)
         trace_draw(ui.tail_trace, x + 8, y + 2, w - 16, h - 4, K_RED);
         cv_text(x + w - 60, y + 2, &FONT_XS, PARAMS[P_RV_TYPE].choice[ed.p[P_RV_TYPE]], K_CREAM);
         if (ui.page == PG_SPACE && ed.p[P_RV_TYPE] != RV_SPACE)
-            cv_text(x + 8, y + 2, &FONT_XS, "FX B TYPE: SPACE", K_GREY);
+            cv_text(x + 8, y + 2, &FONT_XS, "REVERB TYPE: SPACE", K_GREY);
         break;
     }
     case PG_VOICE: {                     /* where each voice stands (SPREAD) */
@@ -1315,7 +1405,12 @@ static void draw_page(void)
                 cv_rect(cx - n * 3 + j * 6, 131, 4, 3, j == v ? K_RED : K_DIM);
         } else {
             int mn = knob_min(code), mx = knob_max(code);
-            knob(cx, 119, 11, v - mn, mx - mn, 0);
+            if (rate_sync(code) >= 0) {
+                v = ed.p[rate_sync(code)] - 1;
+                mn = 0;
+                mx = NLSY - 2;
+            }
+            knob(cx, 119, 11, v - mn, mx - mn, rate_sync(code) >= 0);
             knob_text(code, t);
             ctext(cx, 134, &FONT_XS, t, K_CREAM);
         }
@@ -1540,7 +1635,7 @@ static int intro_frame(uint32_t now)
 void app_init(void)
 {
     int k;
-    plat_cpu2_set(1);                    /* four voices on the second core (one core still works) */
+    plat_cpu2_set(1);                    /* five voices on the second core (one core still works) */
     eng_init();
     settings_load();
     preset_load(set.cur);
@@ -1598,7 +1693,8 @@ void app_frame(void)
     if (seq_dirty && now - seq_dirty_at > 2500u && !eng_playing() && !ui.rec_held)
         seq_save();
     if (now - ui.drawn_at >= 33u) {      /* the LEDs, the traces, the playhead: 30 frames a second */
-        ui.lfo_trace[ui.trace_w & 63u] = eng_lfo();
+        ui.lfo_trace[ui.trace_w & 63u] = eng_lfo(0);
+        ui.lfo2_trace[ui.trace_w & 63u] = eng_lfo(1);
         ui.tail_trace[ui.trace_w & 63u] = fm_minf(1.0f, eng_tail() * 1.6f) * 2.0f - 1.0f;
         ui.trace_w++;
         ui.redraw = 1;
