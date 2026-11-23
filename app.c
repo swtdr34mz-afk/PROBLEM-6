@@ -33,7 +33,8 @@
 #include "engine.h"
 
 /* ----------------------------------------------------------------- settings --- */
-#define SET_MAGIC 0x32374850u            /* "PH72": the settings record (v0.2: LFO 2, LFO SYNC) */
+#define SET_MAGIC 0x33374850u            /* "PH73": the settings record (v0.3: CUTOFF 0..255) */
+#define SET_MAGIC_V2 0x32374850u         /* "PH72": v0.2's (the same, CUTOFF 0..127) */
 #define SET_MAGIC_V1 0x31374850u         /* "PH71": v0.1's, carried over */
 #define NPARAM_V1 54
 #define SEQ_MAGIC 0x51534850u            /* "PHSQ" */
@@ -148,6 +149,7 @@ static int settings_v1(void)             /* v0.1's settings: the presets kept, t
             set.pre[i].name[k] = o.pre[i].name[k];
         for (k = 0; k < NPARAM; k++)
             set.pre[i].p[k] = k < NPARAM_V1 ? o.pre[i].p[k] : 0;
+        set.pre[i].p[P_CUTOFF] = (uint8_t)(o.pre[i].p[P_CUTOFF] >= 127 ? 255 : o.pre[i].p[P_CUTOFF] * 2);
     }
     set.cur = o.cur;
     set.oct = o.oct;
@@ -174,7 +176,15 @@ static int settings_v1(void)             /* v0.1's settings: the presets kept, t
 
 static void settings_load(void)
 {
-    if ((plat_store_load(OBJ_SETTINGS, &set, sizeof set) != (int)sizeof set || !settings_ok()) && !settings_v1())
+    int n = plat_store_load(OBJ_SETTINGS, &set, sizeof set);
+    if (n == (int)sizeof set && set.magic == SET_MAGIC_V2) {   /* v0.2's: CUTOFF to its finer steps */
+        uint32_t i;
+        for (i = 0; i < NPRESETS; i++)
+            set.pre[i].p[P_CUTOFF] = (uint8_t)(set.pre[i].p[P_CUTOFF] >= 127 ? 255 : set.pre[i].p[P_CUTOFF] * 2);
+        set.magic = SET_MAGIC;
+        set_dirty = 1;
+    }
+    if ((n != (int)sizeof set || !settings_ok()) && !settings_v1())
         settings_defaults();
     if (plat_store_load(OBJ_SEQ, &sq, sizeof sq) != (int)sizeof sq || sq.magic != SEQ_MAGIC) {
         memset(&sq, 0, sizeof sq);
@@ -1193,7 +1203,7 @@ static void draw_home(void)
     for (i = 0; i < 4; i++) {
         int32_t cx = 23 + i * 39;
         ctext(cx, 107, &FONT_XS, KN[i], K_CREAM);
-        knob(cx, 125, 8, ed.p[KP[i]], 127, 0);
+        knob(cx, 125, 8, ed.p[KP[i]], PARAMS[KP[i]].max, 0);
         param_text(KP[i], ed.p[KP[i]], t);
         ctext(cx, 136, &FONT_XS, t, K_CREAM);
     }

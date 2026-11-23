@@ -28,7 +28,7 @@ const param_t PARAMS[NPARAM] = {
     [P_MIX_O2] = {"OSC 2", PK_KNOB, 127, 0},
     [P_NOISE] = {"NOISE", PK_KNOB, 127, 0},
     [P_O2_MODE] = {"OSC 2", PK_CHOICE, NO2M - 1, C_O2M},
-    [P_CUTOFF] = {"CUTOFF", PK_HZ, 127, 0},
+    [P_CUTOFF] = {"CUTOFF", PK_HZ, 255, 0},   /* fine: half a semitone a detent */
     [P_RESO] = {"RESONANCE", PK_KNOB, 127, 0},
     [P_ENV_AMT] = {"ENV AMT", PK_BIPOLAR, 127, 0},
     [P_HPF] = {"HP CUTOFF", PK_KNOB, 127, 0},
@@ -160,11 +160,11 @@ void param_text(int p, int v, char *o)
         o = put_int(o, 50 + (v * 45) / 127);
         put_str(o, "%");
         return;
-    case PK_HZ: {                        /* 20 Hz .. 20 kHz (engine.c cutoff_hz) */
+    case PK_HZ: {                        /* 20 Hz .. 20 kHz, 0..255 (engine.c cutoff_oct) */
         float hz = 20.0f;
         int i;
         for (i = 0; i < v; i++)
-            hz *= 1.05592f;              /* 1000^(1/127) */
+            hz *= 1.027461f;             /* 1000^(1/255) */
         if (hz < 1000.0f) {
             put_int(o, (int)hz);
         } else {

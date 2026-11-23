@@ -155,6 +155,11 @@ stereo field, the sixteen bars). POLY MOD, VOICE SPREAD, VINTAGE and the sequenc
   oscillator 2 modulates them through poly mod (then per sample). If a render runs late, the quietest released voice is
   let go. The CLOCK page shows the load: please check it with heavy presets (PM GROWL, GLASS PAD, SPACE DRIFT with
   seven notes).
+- **The filter moves continuously** (v0.3). CUTOFF has 256 steps (half a semitone a detent, 20 Hz to 20 kHz). Each
+  knob detent (and CC 74) reaches the filter spread over about 6 ms, and every filter coefficient then ramps sample by
+  sample from where it was, so neither knob steps nor the 8-sample control rate are heard. The filter envelope, the
+  LFOs and poly mod are not smoothed: they act at once (poly mod by oscillator 2 per sample). Measured on a held
+  note during a knob sweep: the sharpness of each detent's change 11-27 dB lower than v0.2.
 - **No oversampling**: the oscillators are band-limited (aliasing about 40-48 dB down for a saw at C6-C7), the filter's
   saturation is gentle. 2x oversampling would double the voice cost; left out to keep seven voices on the FM-1.
 - **The SPACE reverb** is an original algorithm in the spirit of the Mercury7, not a copy. Its lines are bounded by a

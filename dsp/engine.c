@@ -84,6 +84,10 @@ typedef struct {
     /* its character from VINTAGE and SPREAD (eng_patch) */
     float c1, c2, ccut, cres, ka_f, kd_f, kr_f, ka_a, kd_a, kr_a, camp, cpw, cshape, cpw2, cshape2, cdrive;
     float n1, n2, ncut;                  /* VINTAGE, per note: each keystroke lands a little differently */
+    /* the filters' coefficients where the last chunk ended: each chunk moves from there to its own, sample by sample,
+     * so a cutoff never steps (lG, lig, lG4, lk, lc: the low-pass; ha1, ha2, hg, hk: the high-pass) */
+    float lG, lig, lG4, lk, lc, ha1, ha2, hg, hk;
+    uint8_t cinit;
     float gl, gr;
     uint8_t hd, far;                     /* the spread's delay on the far side (samples), which side (0 L, 1 R) */
     uint8_t hw;
@@ -116,6 +120,13 @@ static uint32_t lfo_seed = 0x1234567u;
 static uint8_t lfo_reset;                /* a note asked for a RETRIG (render) */
 static float blk_mod[NBLK / CH][NLD];    /* each destination's LFO, amounts in */
 static float blk_trem[NBLK / CH];        /* AMP: the gain, 0..1 */
+/* the filter's knobs (and CC 74), as they reach the voices: a knob moves in detents, so each detent's step is spread
+ * over a few milliseconds (6 ms), per chunk; the envelopes, LFOs and poly mod are never smoothed */
+static float blk_cut[NBLK / CH], blk_res[NBLK / CH], blk_env[NBLK / CH], blk_hp[NBLK / CH], blk_hpk[NBLK / CH];
+static struct {
+    float cut, res, env, hp, hpk;
+    uint8_t init;
+} SM;
 
 /* ------------------------------------------------------- the events in --- */
 /* notes from the main loop and the 1 kHz tick come through a queue; the render takes them at the start of a block */
@@ -146,7 +157,7 @@ static void ev_put(int type, int id, int note, float vel)
 
 /* ------------------------------------------------------------- the patch --- */
 static float env_seconds(int v) { return 0.001f * fm_exp2f((float)v * (14.2877f / 127.0f)); }   /* 1 ms .. 20 s */
-static float cutoff_oct(int v) { return 4.321928f + (float)v * (9.965784f / 127.0f); }        /* log2: 20 Hz .. 20 kHz */
+static float cutoff_oct(float v) { return 4.321928f + v * (9.965784f / 255.0f); }   /* log2: 20 Hz .. 20 kHz, 0..255 */
 static float sq_sign(float x) { return x * fm_fabsf(x); }
 
 void eng_patch(const uint8_t *p)
@@ -164,7 +175,7 @@ void eng_patch(const uint8_t *p)
     P.sub = u7(p[P_O1_SUB]);
     P.noise = u7(p[P_NOISE]) * u7(p[P_NOISE]);
     P.o2_mode = p[P_O2_MODE];
-    P.cut_oct = cutoff_oct(p[P_CUTOFF]);
+    P.cut_oct = cutoff_oct((float)p[P_CUTOFF]);
     a = u7(p[P_RESO]);
     P.res_k = 4.25f * a * (0.6f + 0.4f * a);        /* self-oscillation from about 115 */
     P.env_oct = sq_sign(bip(p[P_ENV_AMT])) * 9.0f;
@@ -550,8 +561,8 @@ static void voices_render(int i0, int i1, float *L, float *R)
             continue;
         for (c = 0; c * CH < n; c++) {
             const float *lm = blk_mod[c];
-            float p, inc1, inc2, sh1, pw1, cut, hp, g, G, gh, kh, a1, a2, kres, comp, pm_s, pm_p, pm_l, pm_h, pm_f;
-            float vel_f, famt, hamt, fen, ug, ig, G4, drv, idrv;
+            float p, inc1, inc2, sh1, pw1, cut, hp, G, gh, kh, a1, a2, kres, comp, pm_s, pm_p, pm_l, pm_h, pm_f;
+            float vel_f, famt, hamt, fen, ug, ig, G4, drv, idrv, dG, dig, dG4, dk, dc, dgh, dkh, da1, da2;
             wave_t w1, w2;
             int lowf = P.o2_mode == O2M_LOW || P.o2_mode == O2M_LOWFIX;
             int sync = P.o2_mode == O2M_SYNC;
@@ -597,28 +608,68 @@ static void voices_render(int i0, int i1, float *L, float *R)
             inc2 = fm_minf(inc2, 0.45f);
             /* the filters this chunk */
             vel_f = 1.0f - P.fvel + P.fvel * v->vel;
-            famt = P.env_oct * vel_f;
+            famt = blk_env[c] * vel_f;
             hamt = P.hp_env_oct * vel_f;
-            cut = P.cut_oct + v->ccut + v->ncut + famt * fen + P.keytrk * (p - 60.0f) * (1.0f / 12.0f);
-            hp = P.hp_oct + hamt * fen + P.keytrk * (p - 60.0f) * (1.0f / 12.0f);
-            if (cc_cut >= 0)
-                cut += cutoff_oct(cc_cut) - P.cut_oct;
+            cut = blk_cut[c] + v->ccut + v->ncut + famt * fen + P.keytrk * (p - 60.0f) * (1.0f / 12.0f);
+            hp = blk_hp[c] + hamt * fen + P.keytrk * (p - 60.0f) * (1.0f / 12.0f);
             if (P.pm_dfilt == PMF_LPF || P.pm_dfilt == PMF_BOTH)
                 cut += P.pm_fenv * fen * 7.0f;
             if (P.pm_dfilt == PMF_HPF || P.pm_dfilt == PMF_BOTH)
                 hp += P.pm_fenv * fen * 5.0f;
             cut += lm[LD_LPF] * 4.0f;
             hp += lm[LD_HPF] * 3.0f;
-            kres = P.res_k * v->cres;
-            comp = 1.0f + kres * 0.32f;      /* some of the bass the resonance takes, back (not all: a Prophet's) */
-            g = tan_w(3.1415927f / SR * fm_clampf(fm_exp2f(cut), 12.0f, 17500.0f));
-            gh = tan_w(3.1415927f / SR * fm_clampf(fm_exp2f(hp), 8.0f, 12000.0f));
-            kh = P.hp_k;
-            a1 = 1.0f / (1.0f + gh * (gh + kh));
-            a2 = gh * a1;
-            G = g / (1.0f + g);
-            ig = 1.0f / (1.0f + g);
-            G4 = 1.0f / (1.0f + kres * G * G * G * G);
+            /* this chunk's coefficients (where they are to be at its end) ... */
+            {
+                float tk = blk_res[c] * v->cres, tg, tG, tig, tG4, tgh, tkh, ta1, tc, inv = 1.0f / (float)CH;
+                tc = 1.0f + tk * 0.32f;   /* some of the bass the resonance takes, back (not all: a Prophet's) */
+                tg = tan_w(3.1415927f / SR * fm_clampf(fm_exp2f(cut), 12.0f, 17500.0f));
+                tig = 1.0f / (1.0f + tg);
+                tG = tg * tig;
+                tG4 = 1.0f / (1.0f + tk * tG * tG * tG * tG);
+                tgh = tan_w(3.1415927f / SR * fm_clampf(fm_exp2f(hp), 8.0f, 12000.0f));
+                tkh = blk_hpk[c];
+                ta1 = 1.0f / (1.0f + tgh * (tgh + tkh));
+                if (!v->cinit) {         /* a voice starting from silence: from here */
+                    v->lG = tG;
+                    v->lig = tig;
+                    v->lG4 = tG4;
+                    v->lk = tk;
+                    v->lc = tc;
+                    v->hg = tgh;
+                    v->hk = tkh;
+                    v->ha1 = ta1;
+                    v->ha2 = tgh * ta1;
+                    v->cinit = 1;
+                }
+                /* ... and the steps from where they are, one a sample */
+                G = v->lG;
+                ig = v->lig;
+                G4 = v->lG4;
+                kres = v->lk;
+                comp = v->lc;
+                gh = v->hg;
+                kh = v->hk;
+                a1 = v->ha1;
+                a2 = v->ha2;
+                dG = (tG - G) * inv;
+                dig = (tig - ig) * inv;
+                dG4 = (tG4 - G4) * inv;
+                dk = (tk - kres) * inv;
+                dc = (tc - comp) * inv;
+                dgh = (tgh - gh) * inv;
+                dkh = (tkh - kh) * inv;
+                da1 = (ta1 - a1) * inv;
+                da2 = (tgh * ta1 - a2) * inv;
+                v->lG = tG;
+                v->lig = tig;
+                v->lG4 = tG4;
+                v->lk = tk;
+                v->lc = tc;
+                v->hg = tgh;
+                v->hk = tkh;
+                v->ha1 = ta1;
+                v->ha2 = tgh * ta1;
+            }
             /* poly mod by oscillator 2, per sample */
             pm_f = blk_fm ? P.pm_osc2 * 2.0f : 0.0f;           /* octaves of FM */
             pm_s = blk_pms ? P.pm_osc2 : 0.0f;
@@ -632,9 +683,18 @@ static void voices_render(int i0, int i1, float *L, float *R)
             ug = v->camp * blk_trem[c]
                  * (1.0f - P.avel + P.avel * v->vel);
             for (s = 0; s < CH && c * CH + s < n; s++) {
-                float o1, o2, sub, x, u, S, y1, y2, y3, y4, t, hv1, hv2, hv3, out, rs, ae;
+                float o1, o2, sub, x, u, S, y1, y2, y3, y4, t, hv1, hv2, hv3, out, rs, ae, stG;
                 int wr1, wr2;
                 float wd1 = 0.0f, wd2 = 0.0f;
+                G += dG;                 /* the filters' coefficients, a step a sample */
+                ig += dig;
+                G4 += dG4;
+                kres += dk;
+                comp += dc;
+                gh += dgh;
+                kh += dkh;
+                a1 += da1;
+                a2 += da2;
                 /* the envelopes */
                 if (v->fe.st == ES_ATT) {
                     v->fe.v += (1.3f - v->fe.v) * v->ka_f;
@@ -700,41 +760,45 @@ static void voices_render(int i0, int i1, float *L, float *R)
                 if (P.noise > 0.0f)
                     x += P.noise * 0.7f * noise_seed_f(&v->seed);
                 /* the high-pass (2-pole, state variable) */
-                if (pm_h != 0.0f) {
-                    float gs = tan_w(3.1415927f / SR * fm_clampf(fm_exp2f(hp + pm_h * o2), 8.0f, 12000.0f));
-                    a1 = 1.0f / (1.0f + gs * (gs + kh));
-                    a2 = gs * a1;
-                    gh = gs;
-                }
-                hv3 = x - v->h2;
-                hv1 = a1 * v->h1 + a2 * hv3;
-                hv2 = v->h2 + gh * hv1;
-                v->h1 = 2.0f * hv1 - v->h1;
-                v->h2 = 2.0f * hv2 - v->h2;
-                x = x - kh * hv1 - hv2;
-                /* the low-pass: four one-poles in a loop, solved without a delay; the input saturates */
-                if (pm_l != 0.0f) {
-                    float gs = tan_w(3.1415927f / SR * fm_clampf(fm_exp2f(cut + pm_l * o2), 12.0f, 17500.0f));
-                    ig = 1.0f / (1.0f + gs);
-                    G = gs * ig;
-                    G4 = 1.0f / (1.0f + kres * G * G * G * G);
-                }
                 {
-                    float G2 = G * G;
-                    S = (G2 * G * v->s1 + G2 * v->s2 + G * v->s3 + v->s4) * ig;
-                    u = (x - kres * S) * G4;
+                    float qa1 = a1, qa2 = a2, qg = gh;
+                    if (pm_h != 0.0f) {  /* oscillator 2 moving it: worked out this sample */
+                        qg = tan_w(3.1415927f / SR * fm_clampf(fm_exp2f(hp + pm_h * o2), 8.0f, 12000.0f));
+                        qa1 = 1.0f / (1.0f + qg * (qg + kh));
+                        qa2 = qg * qa1;
+                    }
+                    hv3 = x - v->h2;
+                    hv1 = qa1 * v->h1 + qa2 * hv3;
+                    hv2 = v->h2 + qg * hv1;
+                    v->h1 = 2.0f * hv1 - v->h1;
+                    v->h2 = 2.0f * hv2 - v->h2;
+                    x = x - kh * hv1 - hv2;
+                }
+                /* the low-pass: four one-poles in a loop, solved without a delay; the input saturates */
+                {
+                    float qG = G, qig = ig, qG4 = G4, G2;
+                    if (pm_l != 0.0f) {  /* oscillator 2 moving it: worked out this sample */
+                        float gs = tan_w(3.1415927f / SR * fm_clampf(fm_exp2f(cut + pm_l * o2), 12.0f, 17500.0f));
+                        qig = 1.0f / (1.0f + gs);
+                        qG = gs * qig;
+                        qG4 = 1.0f / (1.0f + kres * qG * qG * qG * qG);
+                    }
+                    G2 = qG * qG;
+                    S = (G2 * qG * v->s1 + G2 * v->s2 + qG * v->s3 + v->s4) * qig;
+                    u = (x - kres * S) * qG4;
+                    stG = qG;
                 }
                 u = sat(u * drv) * idrv;
-                rs = (u - v->s1) * G;
+                rs = (u - v->s1) * stG;
                 y1 = rs + v->s1;
                 v->s1 = y1 + rs;
-                rs = (y1 - v->s2) * G;
+                rs = (y1 - v->s2) * stG;
                 y2 = rs + v->s2;
                 v->s2 = y2 + rs;
-                rs = (y2 - v->s3) * G;
+                rs = (y2 - v->s3) * stG;
                 y3 = rs + v->s3;
                 v->s3 = y3 + rs;
-                rs = (y3 - v->s4) * G;
+                rs = (y3 - v->s4) * stG;
                 y4 = rs + v->s4;
                 v->s4 = y4 + rs;
                 out = y4 * comp * ae * ug * 0.9f;
@@ -759,6 +823,8 @@ static void voices_render(int i0, int i1, float *L, float *R)
                 v->hw++;
             }
         }
+        if (v->ae.st == ES_IDLE && !v->pend)
+            v->cinit = 0;                /* silent: the next note's coefficients start where it starts */
         v->s1 = flush_dn(v->s1);
         v->s2 = flush_dn(v->s2);
         v->s3 = flush_dn(v->s3);
@@ -828,6 +894,28 @@ static void lfo_block(uint32_t n)
                 md[P.lfo_dest[k] < NLD ? P.lfo_dest[k] : 0] += amt[k] * v;
         }
         blk_trem[c] = trem;
+        {
+            const float k = 0.03f;       /* a chunk's share: 6 ms */
+            float tc = P.cut_oct + (cc_cut >= 0 ? cutoff_oct((float)cc_cut * (255.0f / 127.0f)) - P.cut_oct : 0.0f);
+            if (!SM.init) {
+                SM.cut = tc;
+                SM.res = P.res_k;
+                SM.env = P.env_oct;
+                SM.hp = P.hp_oct;
+                SM.hpk = P.hp_k;
+                SM.init = 1;
+            }
+            SM.cut += (tc - SM.cut) * k;
+            SM.res += (P.res_k - SM.res) * k;
+            SM.env += (P.env_oct - SM.env) * k;
+            SM.hp += (P.hp_oct - SM.hp) * k;
+            SM.hpk += (P.hp_k - SM.hpk) * k;
+            blk_cut[c] = SM.cut;
+            blk_res[c] = SM.res;
+            blk_env[c] = SM.env;
+            blk_hp[c] = SM.hp;
+            blk_hpk[c] = SM.hpk;
+        }
     }
 }
 
