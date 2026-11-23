@@ -1,0 +1,92 @@
+# the sequencer (step and live recording, playback, ties, rests) and the arpeggiator
+wait 2000
+# step record: a chord, a note, a rest, a tie
+tap REC
+expect rec 1
+expect page 15
+expect cursor 0
+key w0 down
+key w2 down
+key w4 down
+wait 100
+key w0 up
+key w2 up
+key w4 up
+wait 50
+expect n0 3
+expect cursor 1
+tapkey w1
+expect n1 1
+expect cursor 2
+tap SEQ
+expect cursor 3
+expect n2 0
+tap SAVE
+expect s3 1
+expect cursor 4
+turn PRESET 4
+expect cursor 8
+tapkey w7
+expect n8 1
+shot steprec.png
+tap REC
+expect rec 0
+# play it
+tap PLAY
+expect playing 1
+wav seq.wav
+wait 2400
+expect step >-1
+shot seqplay.png
+# live: a note into the nearest step while it plays
+tap REC
+expect rec 1
+tapkey w9
+wait 100
+wait 2000
+wavstop
+tap PLAY
+expect playing 0
+tap REC
+wait 3000
+expect seqdirty 0
+# the sequence cleared (REC held)
+press REC
+wait 1100
+release REC
+expect n0 0
+expect n8 0
+# the arp: on, a chord held, it steps
+tap ARP
+expect arp 1
+expect page 14
+key w0 down
+key w2 down
+key w4 down
+wav arp.wav
+wait 2000
+expect arpsteps >6
+shot arp.png
+key w0 up
+key w2 up
+key w4 up
+wait 500
+wavstop
+tap ARP
+expect arp 0
+expect page 0
+# MIDI in: a note, the clock
+wait 4000
+expect voices 0
+midi 90 3C 64
+wait 200
+expect voices 1
+midi 80 3C 00
+wait 100
+clock 96 20
+expect ext 1
+expect bpm >122
+tap GLO
+tap GLO
+expect page 13
+shot clockext.png

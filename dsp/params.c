@@ -1,0 +1,173 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 swtdr34mz (PROPHET 67) */
+/* The parameters: their names, kinds and choices, and how their values read on the screen (engine.h). */
+#include "engine.h"
+
+static const char *const C_O2M[NO2M] = {"NORMAL", "SYNC", "LOW FRQ", "LF FIXED"};
+static const char *const C_KT[NKT] = {"OFF", "HALF", "FULL"};
+static const char *const C_LS[NLS] = {"TRI", "SAW", "RAMP", "SQUARE", "S+H"};
+static const char *const C_LD[NLD] = {"FREQ 1+2", "FREQ 1", "FREQ 2", "PW 1+2", "LPF", "HPF", "AMP"};
+static const char *const C_PMO[8] = {"OFF", "FREQ", "SHAPE", "FRQ+SHP", "PW", "FRQ+PW", "SHP+PW", "ALL"};
+static const char *const C_PMF[NPMF] = {"OFF", "LPF", "HPF", "LPF+HPF"};
+static const char *const C_RV[NRV] = {"ROOM", "HALL", "PLATE", "SPRING", "SPACE"};
+static const char *const C_UNI[2] = {"OFF", "ON"};
+
+const param_t PARAMS[NPARAM] = {
+    [P_O1_FREQ] = {"FREQ", PK_SEMI, 48, 0},
+    [P_O1_SHAPE] = {"SHAPE", PK_KNOB, 127, 0},
+    [P_O1_PW] = {"PW", PK_PCT, 127, 0},
+    [P_O1_SUB] = {"SUB OCT", PK_KNOB, 127, 0},
+    [P_O2_FREQ] = {"FREQ", PK_SEMI, 48, 0},
+    [P_O2_FINE] = {"FINE", PK_FINE, 127, 0},
+    [P_O2_SHAPE] = {"SHAPE", PK_KNOB, 127, 0},
+    [P_O2_PW] = {"PW", PK_PCT, 127, 0},
+    [P_MIX_O1] = {"OSC 1", PK_KNOB, 127, 0},
+    [P_MIX_O2] = {"OSC 2", PK_KNOB, 127, 0},
+    [P_NOISE] = {"NOISE", PK_KNOB, 127, 0},
+    [P_O2_MODE] = {"OSC 2", PK_CHOICE, NO2M - 1, C_O2M},
+    [P_CUTOFF] = {"CUTOFF", PK_HZ, 127, 0},
+    [P_RESO] = {"RESONANCE", PK_KNOB, 127, 0},
+    [P_ENV_AMT] = {"ENV AMT", PK_BIPOLAR, 127, 0},
+    [P_HPF] = {"HP CUTOFF", PK_KNOB, 127, 0},
+    [P_HP_RESO] = {"HP RESO", PK_KNOB, 127, 0},
+    [P_KEYTRK] = {"KEYBOARD", PK_CHOICE, NKT - 1, C_KT},
+    [P_FVEL] = {"VELOCITY", PK_KNOB, 127, 0},
+    [P_HP_ENV] = {"HP ENV", PK_BIPOLAR, 127, 0},
+    [P_FA] = {"ATTACK", PK_TIME, 127, 0},
+    [P_FD] = {"DECAY", PK_TIME, 127, 0},
+    [P_FS] = {"SUSTAIN", PK_KNOB, 127, 0},
+    [P_FR] = {"RELEASE", PK_TIME, 127, 0},
+    [P_AA] = {"ATTACK", PK_TIME, 127, 0},
+    [P_AD] = {"DECAY", PK_TIME, 127, 0},
+    [P_AS] = {"SUSTAIN", PK_KNOB, 127, 0},
+    [P_AR] = {"RELEASE", PK_TIME, 127, 0},
+    [P_LFO_RATE] = {"RATE", PK_KNOB, 127, 0},
+    [P_LFO_AMT] = {"AMOUNT", PK_KNOB, 127, 0},
+    [P_LFO_SHAPE] = {"SHAPE", PK_CHOICE, NLS - 1, C_LS},
+    [P_LFO_DEST] = {"DEST", PK_CHOICE, NLD - 1, C_LD},
+    [P_PM_FENV] = {"FILT ENV", PK_BIPOLAR, 127, 0},
+    [P_PM_OSC2] = {"OSC 2", PK_BIPOLAR, 127, 0},
+    [P_PM_DOSC] = {"OSC 1 TO", PK_CHOICE, 7, C_PMO},
+    [P_PM_DFILT] = {"FILTER", PK_CHOICE, NPMF - 1, C_PMF},
+    [P_CH_MIX] = {"CHORUS", PK_KNOB, 127, 0},
+    [P_CH_RATE] = {"RATE", PK_KNOB, 127, 0},
+    [P_CH_DEPTH] = {"DEPTH", PK_KNOB, 127, 0},
+    [P_DIST] = {"DISTORT", PK_KNOB, 127, 0},
+    [P_RV_TYPE] = {"TYPE", PK_CHOICE, NRV - 1, C_RV},
+    [P_RV_MIX] = {"MIX", PK_KNOB, 127, 0},
+    [P_RV_DECAY] = {"DECAY", PK_KNOB, 127, 0},
+    [P_RV_TONE] = {"TONE", PK_BIPOLAR, 127, 0},
+    [P_SP_MOD] = {"MODULATE", PK_KNOB, 127, 0},
+    [P_SP_SHIM] = {"SHIMMER", PK_KNOB, 127, 0},
+    [P_SP_SWELL] = {"SWELL", PK_KNOB, 127, 0},
+    [P_SP_PRE] = {"PREDELAY", PK_KNOB, 127, 0},
+    [P_GLIDE] = {"GLIDE", PK_KNOB, 127, 0},
+    [P_AVEL] = {"VELOCITY", PK_KNOB, 127, 0},
+    [P_UNISON] = {"UNISON", PK_CHOICE, 1, C_UNI},
+    [P_BEND] = {"BEND", PK_KNOB, 12, 0},
+    [P_VINTAGE] = {"VINTAGE", PK_KNOB, 127, 0},
+    [P_SPREAD] = {"SPREAD", PK_KNOB, 127, 0},
+};
+
+static char *put_int(char *o, int v)
+{
+    char t[8];
+    int n = 0;
+    if (v < 0) {
+        *o++ = '-';
+        v = -v;
+    }
+    do {
+        t[n++] = (char)('0' + v % 10);
+        v /= 10;
+    } while (v && n < 7);
+    while (n)
+        *o++ = t[--n];
+    *o = 0;
+    return o;
+}
+
+static void put_str(char *o, const char *s)
+{
+    while (*s)
+        *o++ = *s++;
+    *o = 0;
+}
+
+/* the envelope times as the engine reads them (engine.c env_seconds): 1 ms .. 20 s */
+static void put_time(char *o, int v)
+{
+    /* 0.001 * 20000^(v/127), in ms below a second */
+    float t = 1.0f, k = 1.0811f;           /* 20000^(1/127) */
+    int i, ms;
+    for (i = 0; i < v; i++)
+        t *= k;
+    ms = (int)(t + 0.5f);
+    if (ms < 1000) {
+        o = put_int(o, ms);
+        put_str(o, "ms");
+    } else {
+        int ds = (ms + 50) / 100;
+        o = put_int(o, ds / 10);
+        if (ds < 100) {
+            *o++ = '.';
+            o = put_int(o, ds % 10);
+        }
+        put_str(o, "s");
+    }
+}
+
+void param_text(int p, int v, char *o)
+{
+    const param_t *d = &PARAMS[p];
+    if (v > d->max)
+        v = d->max;
+    switch (d->kind) {
+    case PK_CHOICE:
+        put_str(o, d->choice[v]);
+        return;
+    case PK_BIPOLAR:
+        if (v > 64)
+            *o++ = '+';
+        put_int(o, v - 64);
+        return;
+    case PK_SEMI:                        /* -24 .. +24 semitones */
+        if (v > 24)
+            *o++ = '+';
+        put_int(o, v - 24);
+        return;
+    case PK_FINE:                        /* -50 .. +50 cents */
+        if (v > 64)
+            *o++ = '+';
+        o = put_int(o, ((v - 64) * 50) / 63);
+        put_str(o, "c");
+        return;
+    case PK_TIME:
+        put_time(o, v);
+        return;
+    case PK_PCT:                         /* pulse width 50 .. 95 % */
+        o = put_int(o, 50 + (v * 45) / 127);
+        put_str(o, "%");
+        return;
+    case PK_HZ: {                        /* 20 Hz .. 20 kHz (engine.c cutoff_hz) */
+        float hz = 20.0f;
+        int i;
+        for (i = 0; i < v; i++)
+            hz *= 1.05592f;              /* 1000^(1/127) */
+        if (hz < 1000.0f) {
+            put_int(o, (int)hz);
+        } else {
+            int dk = (int)(hz / 100.0f + 0.5f);
+            o = put_int(o, dk / 10);
+            if (dk < 100) {
+                *o++ = '.';
+                o = put_int(o, dk % 10);
+            }
+            put_str(o, "k");
+        }
+        return;
+    }
+    default:
+        put_int(o, v);
+    }
+}

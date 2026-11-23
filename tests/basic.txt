@@ -1,0 +1,120 @@
+# PROPHET 67 in the host simulator:
+#   X0X_FONTSET=terminus python3 fm1-base/tools/build.py . --host, then build/host/prophet67_host tests/basic.txt build/host
+splashshot splash.png
+wait 300
+shot intro.png
+wait 1500
+# first start: POLY PAD, the FILTER page, octave 0
+expect cur 0
+expect page 0
+expect oct 0
+shot boot.png
+# a chord: three keys held
+key w0 down
+key w2 down
+key w4 down
+wav chord.wav
+wait 1500
+expect voices 3
+shot chord.png
+key w0 up
+key w2 up
+key w4 up
+wait 2500
+wavstop
+expect peak_db_min -30
+# seven voices, then an eighth: one is taken
+key w0 down
+key w1 down
+key w2 down
+key w3 down
+key w4 down
+key w5 down
+key w6 down
+wait 300
+expect voices 7
+key w7 down
+wait 300
+expect steals 1
+expect voices 7
+key w0 up
+key w1 up
+key w2 up
+key w3 up
+key w4 up
+key w5 up
+key w6 up
+key w7 up
+wait 3000
+# a knob on the FILTER page: CUTOFF up
+turn K1 10
+wait 50
+expect edited 1
+# the pages
+tap SEL
+expect page 2
+shot osc1.png
+tap SEL
+expect page 3
+tap SEL
+expect page 4
+shot mixer.png
+tap ENV
+expect page 5
+shot fenv.png
+tap EDIT
+expect page 8
+shot polymod.png
+tap FX
+expect page 9
+tap FX
+expect page 10
+shot reverb.png
+tap FX
+expect page 11
+tap LFO
+expect page 7
+tap GLO
+expect page 12
+shot voice.png
+tap GLO
+expect page 13
+shot clock.png
+tap HOME
+expect page 0
+# VINTAGE and SPREAD
+turn SELECT 30
+wait 50
+expect vintage >50
+turn ALGO 20
+wait 50
+expect spread >80
+shot macros.png
+# HOME held: back to the preset as saved
+press HOME
+wait 1100
+release HOME
+expect edited 0
+expect vintage 50
+# presets
+turn PRESET 2
+wait 100
+expect cur 2
+shot sync.png
+key w4 down
+wav sync.wav
+wait 1200
+key w4 up
+wait 800
+wavstop
+turn PRESET 2
+wait 100
+expect cur 4
+key w2 down
+key w6 down
+wav bells.wav
+wait 600
+key w2 up
+key w6 up
+wait 3000
+wavstop

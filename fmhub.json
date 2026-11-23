@@ -1,0 +1,9 @@
+{
+  "what": "A 7-voice analogue-style polysynth in the manner of the Sequential Prophet-6: two oscillators with continuously variable shape, hard sync and a sub-octave, a high-pass into a self-oscillating 4-pole low-pass, the classic POLY MOD, VINTAGE voice character (SELECT), VOICE SPREAD (ALGORITHM), distortion, BBD chorus, room/hall/plate/spring reverbs and SPACE, an ambient reverb after the Mercury7. A 16-bar polyphonic step sequencer, an arpeggiator, MIDI clock in.",
+  "author": "swtdr34mz",
+  "kinds": "synth",
+  "play": "https://swtdr34mz-afk.github.io/PROPHET-67/emu/",
+  "image": "site/img/screen-main.png",
+  "color": "#EC2C22",
+  "sounds": "none"
+}

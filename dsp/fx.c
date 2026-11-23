@@ -1,0 +1,327 @@
+/* SPDX-License-Identifier: MPL-2.0
+ * Copyright (C) 2026 swtdr34mz (PROPHET 67) */
+/* PROPHET 67's effects, in the Prophet-6's order: the analogue distortion, then FX A (a BBD-style stereo chorus), then
+ * FX B, a reverb: ROOM, HALL, PLATE and SPRING as the Prophet-6's unit B has, and SPACE, an ambient reverb after the
+ * Meris Mercury7 (modulated, diffuse, very long, with SWELL, SHIMMER and PREDELAY).
+ *
+ * The reverbs share one core: input diffusion (allpasses), eight delay lines with a Householder feedback matrix, each
+ * line damped and gently modulated. The types differ in their line lengths, diffusion, damping, modulation and what
+ * comes before the lines (a spring's chirping dispersion; SPACE's swell, shimmer and long predelay). One type runs at a
+ * time, so they share the memory. */
+#include "core.h"
+#include "plat.h"
+
+/* ------------------------------------------------------------ parameters --- */
+static struct {
+    float dist, dist_g, dist_c;          /* DISTORT: amount, drive, level after */
+    float ch_mix, ch_hz, ch_depth;
+    uint8_t type;
+    float mix, t60, damp_hz, low_hz, size, diff, mod, mod_hz;
+    float shim, swell_k, pre;
+} F;
+static uint8_t type_now = 0xFF;
+
+/* --------------------------------------------------------------- memory --- */
+#define CHN 1024u                        /* chorus lines (23 ms) */
+static float ch_l[CHN] PLAT_POOL, ch_r[CHN] PLAT_POOL;
+static uint32_t ch_w;
+static float ch_ph, ch_lpl, ch_lpr;
+
+#define NL 8
+#define LMAX 4400u                       /* a line at most (100 ms) */
+static float rv_line[NL][LMAX] PLAT_POOL;
+static uint32_t rv_len[NL], rv_w[NL];
+static float rv_lp[NL], rv_g[NL], rv_mph[NL];
+static const uint16_t LBASE[NL] = {1557, 1617, 1491, 1422, 1277, 1356, 1188, 1116};   /* mutually prime-ish */
+static const float LMHZ[NL] = {0.31f, 0.43f, 0.37f, 0.53f, 0.29f, 0.47f, 0.41f, 0.59f};
+
+#define NAP 4
+#define APMAX 1100u
+static float ap_buf[NAP][APMAX] PLAT_POOL;
+static uint32_t ap_len[NAP], ap_w[NAP];
+static const uint16_t APBASE[NAP] = {142, 107, 379, 277};
+
+#define PREN 8192u                       /* predelay: up to 185 ms */
+static float pre_buf[PREN] PLAT_POOL;
+static uint32_t pre_w, pre_d;
+
+#define SHN 4096u                        /* the shimmer's pitch shifter */
+static float sh_buf[SHN] PLAT_POOL;
+static uint32_t sh_w;
+static float sh_d, sh_fb;
+
+static float sp_x[12];                   /* the spring's dispersion: first-order allpasses */
+static float sw_g = 1.0f, sw_fast, sw_slow;   /* SWELL */
+static float hp_in, lp_out_l, lp_out_r, tail;
+static float dist_lpl, dist_lpr;
+static uint32_t mod_c;
+
+/* the lines' safety: unity for the levels a reverb lives at, rounding off above 1 and never past 2 (a held SPACE
+ * fed again and again stays bounded) */
+static inline float soft2(float x)
+{
+    float h = x * 0.5f, h2;
+    if (h > 3.0f)
+        return 2.0f;
+    if (h < -3.0f)
+        return -2.0f;
+    h2 = h * h;
+    return 2.0f * h * (27.0f + h2) / (27.0f + 9.0f * h2);
+}
+
+/* ---------------------------------------------------------- the patch --- */
+void fx_patch(const uint8_t *p)
+{
+    float d = u7(p[P_DIST]), dv = u7(p[P_RV_DECAY]), tone = bip(p[P_RV_TONE]);
+    static const float T_LO[NRV] = {0.25f, 0.9f, 0.5f, 0.7f, 2.0f}, T_HI[NRV] = {2.5f, 9.0f, 6.0f, 4.0f, 70.0f};
+    static const float SIZE[NRV] = {0.42f, 1.0f, 0.62f, 0.38f, 2.6f};
+    static const float DIFF[NRV] = {0.62f, 0.68f, 0.78f, 0.45f, 0.72f};
+    static const float DAMP[NRV] = {5200.0f, 6000.0f, 9500.0f, 4200.0f, 7000.0f};
+    static const float LOWC[NRV] = {120.0f, 80.0f, 90.0f, 220.0f, 60.0f};
+    static const float PRE[NRV] = {0.004f, 0.022f, 0.008f, 0.0f, 0.0f};
+    uint8_t t = p[P_RV_TYPE] < NRV ? p[P_RV_TYPE] : RV_HALL;
+    F.dist = d;
+    F.dist_g = 1.0f + 14.0f * d * d;
+    F.dist_c = 1.0f / (1.0f + 2.5f * d);
+    F.ch_mix = u7(p[P_CH_MIX]);
+    F.ch_hz = 0.08f * fm_exp2f((float)p[P_CH_RATE] * (6.0f / 127.0f));   /* 0.08 .. 5 Hz */
+    F.ch_depth = u7(p[P_CH_DEPTH]);
+    F.type = t;
+    F.mix = u7(p[P_RV_MIX]);
+    F.t60 = T_LO[t] * fm_exp2f(dv * fm_log2f(T_HI[t] / T_LO[t]));
+    if (t == RV_SPACE && p[P_RV_DECAY] >= 127)
+        F.t60 = 1e6f;                    /* SPACE at the top: it holds (only the damping takes the highs) */
+    if (t == RV_SPACE && p[P_SP_SHIM] && F.t60 > 30.0f)
+        F.t60 = 30.0f;                   /* (with the shimmer feeding it, a hold would only grow) */
+    F.damp_hz = DAMP[t] * fm_exp2f(tone * 1.6f);
+    F.low_hz = LOWC[t] * fm_exp2f(-tone * 0.8f);
+    F.size = SIZE[t];
+    F.diff = DIFF[t];
+    F.mod = t == RV_SPACE ? 2.0f + 22.0f * u7(p[P_SP_MOD]) : t == RV_HALL ? 3.0f : t == RV_PLATE ? 1.5f : 0.6f;
+    F.mod_hz = t == RV_SPACE ? 0.25f + 1.2f * u7(p[P_SP_MOD]) : 0.5f;
+    F.shim = t == RV_SPACE ? u7(p[P_SP_SHIM]) * 0.45f : 0.0f;
+    F.swell_k = t == RV_SPACE && p[P_SP_SWELL] ? k_of(0.03f + 3.0f * u7(p[P_SP_SWELL]) * u7(p[P_SP_SWELL])) : 1.0f;
+    F.pre = t == RV_SPACE ? 0.18f * u7(p[P_SP_PRE]) : PRE[t];
+    if (t != type_now) {                 /* a new type: its line lengths (the render clears the lines) */
+        int i;
+        for (i = 0; i < NL; i++) {
+            uint32_t L = (uint32_t)((float)LBASE[i] * F.size);
+            if (L > LMAX - 40u)
+                L = LMAX - 40u;
+            rv_len[i] = L;
+        }
+        for (i = 0; i < NAP; i++) {
+            uint32_t L = (uint32_t)((float)APBASE[i] * (t == RV_SPACE ? 2.4f : t == RV_PLATE ? 1.3f : 1.0f));
+            ap_len[i] = L < APMAX ? L : APMAX - 1u;
+        }
+        type_now = t;
+        fx_clear();
+    }
+    {
+        int i;
+        for (i = 0; i < NL; i++)         /* each line loses 60 dB in T60 */
+            rv_g[i] = fm_exp2f(-9.965784f * (float)rv_len[i] / (F.t60 * SR));
+    }
+    pre_d = (uint32_t)(F.pre * SR);
+    if (pre_d > PREN - 2u)
+        pre_d = PREN - 2u;
+}
+
+void fx_clear(void)
+{
+    uint32_t i, k;
+    for (k = 0; k < NL; k++) {
+        for (i = 0; i < LMAX; i++)
+            rv_line[k][i] = 0.0f;
+        rv_lp[k] = 0.0f;
+    }
+    for (k = 0; k < NAP; k++)
+        for (i = 0; i < APMAX; i++)
+            ap_buf[k][i] = 0.0f;
+    for (i = 0; i < PREN; i++)
+        pre_buf[i] = 0.0f;
+    for (i = 0; i < SHN; i++)
+        sh_buf[i] = 0.0f;
+    for (i = 0; i < CHN; i++)
+        ch_l[i] = ch_r[i] = 0.0f;
+    for (i = 0; i < 12u; i++)
+        sp_x[i] = 0.0f;
+    sh_fb = tail = 0.0f;
+}
+
+void fx_init(void)
+{
+    uint8_t p[NPARAM] = {0};
+    p[P_RV_TYPE] = RV_HALL;
+    p[P_RV_TONE] = 64;
+    fx_patch(p);
+}
+
+float fx_tail(void) { return tail; }
+
+/* ----------------------------------------------------------- the pieces --- */
+static inline float rd_frac(const float *b, uint32_t mask_or_len, uint32_t w, float d, int pow2)
+{
+    float rp = (float)w - d;
+    int32_t i;
+    float f, a, c;
+    uint32_t i0, i1;
+    if (rp < 0.0f)
+        rp += (float)mask_or_len + (pow2 ? 1.0f : 0.0f);
+    i = (int32_t)rp;
+    f = rp - (float)i;
+    if (pow2) {
+        i0 = (uint32_t)i & mask_or_len;
+        i1 = (i0 + 1u) & mask_or_len;
+    } else {
+        i0 = (uint32_t)i;
+        if (i0 >= mask_or_len)
+            i0 -= mask_or_len;
+        i1 = i0 + 1u >= mask_or_len ? 0u : i0 + 1u;
+    }
+    a = b[i0];
+    c = b[i1];
+    return a + (c - a) * f;
+}
+
+/* the shimmer: an octave up, two heads sliding through a window, crossfaded */
+static float shimmer(float x)
+{
+    const float D = 2400.0f;
+    float d2, w1, w2, y;
+    sh_buf[sh_w & (SHN - 1u)] = x;
+    sh_d -= 1.0f;                         /* an octave up: the delay shrinks a sample a sample */
+    if (sh_d < 0.0f)
+        sh_d += D;
+    d2 = sh_d + D * 0.5f;
+    if (d2 >= D)
+        d2 -= D;
+    w1 = 1.0f - fm_fabsf(2.0f * sh_d / D - 1.0f);
+    w2 = 1.0f - w1;
+    y = w1 * rd_frac(sh_buf, SHN - 1u, sh_w, sh_d + 1.0f, 1) + w2 * rd_frac(sh_buf, SHN - 1u, sh_w, d2 + 1.0f, 1);
+    sh_w++;
+    return y;
+}
+
+/* ------------------------------------------------------------- the block --- */
+void fx_process(float *l, float *r, uint32_t n)
+{
+    uint32_t s, k;
+    float kd = 1.0f - fm_expf(-6.2831853f * fm_minf(F.damp_hz, 18000.0f) / SR);
+    float kl = 1.0f - fm_expf(-6.2831853f * F.low_hz / SR);
+    float kdist = 1.0f - fm_expf(-6.2831853f * 9000.0f / SR);
+    float ch_k = 1.0f - fm_expf(-6.2831853f * 7500.0f / SR);
+    float wet_g = F.mix * 1.25f, dry_g = 1.0f - F.mix * F.mix * 0.55f;
+    float tl = 0.0f;
+    float mod_now[NL];
+    /* the lines' wobble, once a block (2.9 ms: fine for a few samples of slow movement) */
+    for (k = 0; k < NL; k++) {
+        rv_mph[k] += LMHZ[k] * F.mod_hz * (float)n / SR;
+        if (rv_mph[k] >= 1.0f)
+            rv_mph[k] -= 1.0f;
+        mod_now[k] = F.mod * (1.0f + fm_sin_turns(rv_mph[k])) * 0.5f + 1.0f;
+    }
+    mod_c++;
+    for (s = 0; s < n; s++) {
+        float L = l[s], R = r[s], x, sum, out_l, out_r, fb[NL];
+        /* the analogue distortion */
+        if (F.dist > 0.0f) {
+            L = fm_tanhf(L * F.dist_g) * F.dist_c;
+            R = fm_tanhf(R * F.dist_g) * F.dist_c;
+            dist_lpl += (L - dist_lpl) * kdist;
+            dist_lpr += (R - dist_lpr) * kdist;
+            L = L + (dist_lpl - L) * F.dist;   /* the fizz rounded off as it gets harder */
+            R = R + (dist_lpr - R) * F.dist;
+        }
+        /* FX A: the chorus, two bucket brigades swept by one triangle a quarter apart, their highs dulled */
+        if (F.ch_mix > 0.0f) {
+            float tl_ = ch_ph, tr_ = ch_ph + 0.25f, dl, dr, wl, wr;
+            if (tr_ >= 1.0f)
+                tr_ -= 1.0f;
+            tl_ = 1.0f - 4.0f * fm_fabsf(tl_ - 0.5f);
+            tr_ = 1.0f - 4.0f * fm_fabsf(tr_ - 0.5f);
+            dl = (0.0065f + 0.0042f * F.ch_depth * tl_) * SR;
+            dr = (0.0065f + 0.0042f * F.ch_depth * tr_) * SR;
+            ch_l[ch_w & (CHN - 1u)] = L;
+            ch_r[ch_w & (CHN - 1u)] = R;
+            wl = rd_frac(ch_l, CHN - 1u, ch_w, dl, 1);
+            wr = rd_frac(ch_r, CHN - 1u, ch_w, dr, 1);
+            ch_w++;
+            ch_lpl += (wl - ch_lpl) * ch_k;
+            ch_lpr += (wr - ch_lpr) * ch_k;
+            L = L * (1.0f - 0.35f * F.ch_mix) + ch_lpr * F.ch_mix * 0.85f;   /* crossed: wider */
+            R = R * (1.0f - 0.35f * F.ch_mix) + ch_lpl * F.ch_mix * 0.85f;
+            ch_ph += F.ch_hz / SR;
+            if (ch_ph >= 1.0f)
+                ch_ph -= 1.0f;
+        }
+        if (F.mix <= 0.0f) {
+            l[s] = L;
+            r[s] = R;
+            continue;
+        }
+        /* FX B: the reverb's input: mono, the lows cut, predelayed */
+        x = (L + R) * 0.5f;
+        hp_in += (x - hp_in) * kl;
+        x -= hp_in;
+        if (F.type == RV_SPACE) {        /* SWELL: after each new note the reverb fades in */
+            float a = fm_fabsf(x);
+            sw_fast += (a - sw_fast) * (a > sw_fast ? 0.05f : 0.0006f);
+            sw_slow += (a - sw_slow) * 0.00008f;
+            if (F.swell_k < 1.0f && sw_fast > sw_slow * 2.2f + 0.02f && sw_g > 0.6f)
+                sw_g = 0.0f;
+            sw_g += (1.0f - sw_g) * F.swell_k;
+            x = x * sw_g + sh_fb;        /* and the shimmer's octave goes round again */
+        }
+        pre_buf[pre_w & (PREN - 1u)] = x;
+        x = pre_buf[(pre_w - pre_d) & (PREN - 1u)];
+        pre_w++;
+        if (F.type == RV_SPRING) {       /* a spring: dispersion, its chirp */
+            for (k = 0; k < 12u; k++) {
+                float y = -0.62f * x + sp_x[k];
+                sp_x[k] = x + 0.62f * y;
+                x = y;
+            }
+        }
+        for (k = 0; k < NAP; k++) {      /* diffusion: a burst of echoes into a wash */
+            uint32_t ri = ap_w[k] >= ap_len[k] ? ap_w[k] - ap_len[k] : ap_w[k] + APMAX - ap_len[k];
+            float dly = ap_buf[k][ri], v = x + F.diff * dly;
+            ap_buf[k][ap_w[k]] = v;
+            x = dly - F.diff * v;
+            ap_w[k] = ap_w[k] + 1u >= APMAX ? 0u : ap_w[k] + 1u;
+        }
+        /* the eight lines: read (wobbling), damp, mix (Householder), write back with the input */
+        sum = 0.0f;
+        for (k = 0; k < NL; k++) {
+            float d = (float)rv_len[k] - mod_now[k], y;
+            y = rd_frac(rv_line[k], LMAX, rv_w[k], d, 0);
+            rv_lp[k] += (y - rv_lp[k]) * kd;
+            fb[k] = rv_lp[k] * rv_g[k];
+            sum += fb[k];
+        }
+        sum *= 0.25f;                    /* 2 / N */
+        out_l = fb[0] - fb[2] + fb[4] - fb[6] + 0.5f * (fb[1] + fb[5]);
+        out_r = fb[1] - fb[3] + fb[5] - fb[7] + 0.5f * (fb[2] + fb[6]);
+        for (k = 0; k < NL; k++) {
+            float in = (k & 1u) ? -x : x;
+            rv_line[k][rv_w[k]] = flush_dn(soft2(fb[k] - sum + in * 0.35f));
+            rv_w[k] = rv_w[k] + 1u >= LMAX ? 0u : rv_w[k] + 1u;
+        }
+        out_l *= 0.42f;
+        out_r *= 0.42f;
+        if (F.type == RV_SPACE && F.shim > 0.0f)
+            sh_fb = shimmer((out_l + out_r) * 0.5f) * F.shim;
+        else
+            sh_fb = 0.0f;
+        lp_out_l += (out_l - lp_out_l) * 0.6f;
+        lp_out_r += (out_r - lp_out_r) * 0.6f;
+        tl = fm_maxf(tl, fm_fabsf(lp_out_l) + fm_fabsf(lp_out_r));
+        l[s] = L * dry_g + lp_out_l * wet_g;
+        r[s] = R * dry_g + lp_out_r * wet_g;
+    }
+    tail = tl > tail ? tl : tail * 0.98f;
+    for (k = 0; k < NL; k++)
+        rv_lp[k] = flush_dn(rv_lp[k]);
+    hp_in = flush_dn(hp_in);
+    sh_fb = flush_dn(sh_fb);
+}
