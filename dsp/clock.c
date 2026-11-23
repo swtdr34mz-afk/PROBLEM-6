@@ -21,17 +21,18 @@ static float since_ext;                  /* samples since the last one */
 static volatile uint8_t ext_cmd;         /* a START / STOP / CONTINUE waiting */
 
 /* ------------------------------------------------------------ the sequencer --- */
+/* four tracks, each on its own: its length, rate, transpose, mute, where it is, the notes it holds */
 static const seq_t *seq;
-static uint8_t playing, bars = 1, rate = RATE_16;
-static float gate = 0.5f;
-static int8_t transpose;
-static int16_t step = -1;                /* the step playing */
-static uint8_t step_tick;                /* ticks into it */
-static uint8_t on_n;                     /* the step's notes sounding */
-static int8_t on_note[SEQ_POLY];
-static float on_left;                    /* samples until they are let go (< 0: held) */
-static float swing_wait = -1.0f;         /* a swung step waits this many samples (-1: none waiting) */
-static int16_t swing_step;
+static uint8_t playing;
+static uint8_t tlen[NTRK] = {16, 16, 16, 16}, trate[NTRK] = {RATE_16, RATE_16, RATE_16, RATE_16}, tmute[NTRK];
+static int8_t ttr[NTRK];
+static int16_t step[NTRK] = {-1, -1, -1, -1};   /* the step playing */
+static uint8_t step_tick[NTRK];          /* ticks into it */
+static uint8_t on_n[NTRK];               /* the step's notes sounding */
+static int8_t on_note[NTRK][SEQ_POLY];
+static float on_left[NTRK] = {-1.0f, -1.0f, -1.0f, -1.0f};   /* samples until they are let go (< 0: held) */
+static float swing_wait[NTRK] = {-1.0f, -1.0f, -1.0f, -1.0f};   /* a swung step waits this long (-1: none waiting) */
+static int16_t swing_step[NTRK];
 
 /* -------------------------------------------------------------- the arp --- */
 #define AK 16
@@ -44,32 +45,37 @@ static uint8_t arp_tick;
 static int16_t arp_idx;
 static int8_t arp_last = -1, arp_dir = 1, arp_shown = -1;   /* sounding; the last played (the screen) */
 static float arp_left = -1.0f;
+static uint8_t arp_trk;                  /* the track it plays */
 static uint32_t arp_steps_n, arp_seed = 0xA5A5F00Du;
 
 void clock_init(void) {}
 
-static void seq_release(void)
+static void seq_release(int t)
 {
     uint8_t i;
-    for (i = 0; i < on_n; i++)
-        voice_off(SRC_SEQ | on_note[i]);
-    on_n = 0;
-    on_left = -1.0f;
+    for (i = 0; i < on_n[t]; i++)
+        voice_off(SRC_SEQ | TRK_ID(t) | on_note[t][i]);
+    on_n[t] = 0;
+    on_left[t] = -1.0f;
 }
 
 static void arp_release(void)
 {
     if (arp_last >= 0)
-        voice_off(SRC_ARP | arp_last);
+        voice_off(SRC_ARP | TRK_ID(arp_trk) | arp_last);
     arp_last = -1;
     arp_left = -1.0f;
 }
 
 void clock_panic(void)
 {
-    on_n = 0;
+    int t;
+    for (t = 0; t < NTRK; t++) {
+        on_n[t] = 0;
+        on_left[t] = -1.0f;
+    }
     arp_last = -1;
-    on_left = arp_left = -1.0f;
+    arp_left = -1.0f;
 }
 
 static float spt_now(void) { return eng_clock_ext() && ext_spt > 0.0f ? ext_spt : spt; }
@@ -80,47 +86,52 @@ float clock_pos(void)
     return (float)ticks + fm_minf(f, 0.999f);
 }
 
-/* a step of the sequencer: its notes on (a TIE holds the notes before) */
-static void seq_fire(int st)
+/* a step of a track: its notes on, at its velocity, for its gate (a TIE holds the notes before) */
+static void seq_fire(int t, int st)
 {
-    const uint8_t *nt = seq->note[st];
-    float len = spt_now() * (float)RATE_TICKS[rate];
+    const step_t *sp = &seq->st[t][st];
+    float len = spt_now() * (float)RATE_TICKS[trate[t]], g = sp->gate ? (float)sp->gate * 0.01f : 0.5f;
+    float vel = sp->vel ? (float)sp->vel * (1.0f / 127.0f) : 100.0f / 127.0f;
     uint8_t i;
-    if (nt[0] == SN_TIE) {
-        if (on_n)
-            on_left = len * gate + len;  /* longer: through this step too */
+    if (tmute[t]) {
+        seq_release(t);
         return;
     }
-    seq_release();
+    if (sp->note[0] == SN_TIE) {
+        if (on_n[t])
+            on_left[t] = len * g + len;  /* longer: through this step too */
+        return;
+    }
+    seq_release(t);
     for (i = 0; i < SEQ_POLY; i++) {
-        int note = nt[i];
+        int note = sp->note[i];
         if (note < 12)
             continue;
-        note += transpose;
+        note += ttr[t];
         if (note < 0 || note > 127)
             continue;
-        voice_on(SRC_SEQ | note, note, 0.8f);
-        on_note[on_n++] = (int8_t)note;
+        voice_on(SRC_SEQ | TRK_ID(t) | note, note, vel);
+        on_note[t][on_n[t]++] = (int8_t)note;
     }
-    on_left = len * gate;
+    on_left[t] = len * g;
 }
-
-static int seq_len(void) { return (int)bars * 16; }
 
 static void seq_tick(void)
 {
+    int t;
     if (!playing || !seq)
         return;
-    if (step < 0 || ++step_tick >= RATE_TICKS[rate]) {
-        step_tick = 0;
-        step = (int16_t)(step + 1 >= seq_len() ? 0 : step + 1);
-        if ((step & 1) && swing > 0.0f) {   /* the odd steps a little late */
-            swing_wait = swing * spt_now() * (float)RATE_TICKS[rate];
-            swing_step = step;
-        } else {
-            seq_fire(step);
+    for (t = 0; t < NTRK; t++)
+        if (step[t] < 0 || ++step_tick[t] >= RATE_TICKS[trate[t]]) {
+            step_tick[t] = 0;
+            step[t] = (int16_t)(step[t] + 1 >= tlen[t] ? 0 : step[t] + 1);
+            if ((step[t] & 1) && swing > 0.0f) {   /* the odd steps a little late */
+                swing_wait[t] = swing * spt_now() * (float)RATE_TICKS[trate[t]];
+                swing_step[t] = step[t];
+            } else {
+                seq_fire(t, step[t]);
+            }
         }
-    }
 }
 
 /* ---------------------------------------------------------------- the arp --- */
@@ -186,7 +197,7 @@ static void arp_next(void)
     }
     if (note > 127)
         note -= 12;
-    voice_on(SRC_ARP | note, note, vel);
+    voice_on(SRC_ARP | TRK_ID(arp_trk) | note, note, vel);
     arp_last = arp_shown = (int8_t)note;
     arp_left = spt_now() * (float)RATE_TICKS[arp_rate] * arp_gate;
     arp_steps_n++;
@@ -225,14 +236,20 @@ void clock_block(uint32_t n)
     if (ext_cmd) {
         uint8_t c = ext_cmd;
         ext_cmd = 0;
+        int t;
         if (c == CLK_STOP + 1) {
             playing = 0;
-            seq_release();
-            step = -1;
+            for (t = 0; t < NTRK; t++) {
+                seq_release(t);
+                swing_wait[t] = -1.0f;
+                step[t] = -1;
+            }
         } else {
             if (c == CLK_START + 1) {
-                step = -1;
-                step_tick = 0;
+                for (t = 0; t < NTRK; t++) {
+                    step[t] = -1;
+                    step_tick[t] = 0;
+                }
                 arp_tick = 0;
             }
             playing = seq != 0;
@@ -262,15 +279,20 @@ void clock_block(uint32_t n)
     }
     since_ext += fn;
     /* the gates */
-    if (swing_wait >= 0.0f) {
-        swing_wait -= fn;
-        if (swing_wait < 0.0f && playing && seq)
-            seq_fire(swing_step);
-    }
-    if (on_left >= 0.0f) {
-        on_left -= fn;
-        if (on_left < 0.0f)
-            seq_release();
+    {
+        int t;
+        for (t = 0; t < NTRK; t++) {
+            if (swing_wait[t] >= 0.0f) {
+                swing_wait[t] -= fn;
+                if (swing_wait[t] < 0.0f && playing && seq)
+                    seq_fire(t, swing_step[t]);
+            }
+            if (on_left[t] >= 0.0f) {
+                on_left[t] -= fn;
+                if (on_left[t] < 0.0f)
+                    seq_release(t);
+            }
+        }
     }
     if (arp_left >= 0.0f) {
         arp_left -= fn;
@@ -281,38 +303,49 @@ void clock_block(uint32_t n)
 
 /* ---------------------------------------------------------------- the calls --- */
 void eng_seq_bind(const seq_t *s) { seq = s; }
-void eng_seq_set(int b, int r, float g, int tr)
+void eng_trk_set(int t, int len, int r, int tr, int mute)
 {
-    bars = (uint8_t)(b < 1 ? 1 : b > SEQ_BARS ? SEQ_BARS : b);
-    rate = (uint8_t)(r >= 0 && r < NRATE ? r : RATE_16);
-    gate = fm_clampf(g, 0.05f, 1.0f);
-    transpose = (int8_t)tr;
+    uint32_t f;
+    if (t < 0 || t >= NTRK)
+        return;
+    f = plat_lock();
+    tlen[t] = (uint8_t)(len < 1 ? 1 : len > TRK_STEPS ? TRK_STEPS : len);
+    trate[t] = (uint8_t)(r >= 0 && r < NRATE ? r : RATE_16);
+    ttr[t] = (int8_t)(tr < -24 ? -24 : tr > 24 ? 24 : tr);
+    if (mute && !tmute[t])
+        seq_release(t);
+    tmute[t] = (uint8_t)(mute != 0);
+    if (step[t] >= tlen[t])
+        step[t] = (int16_t)(tlen[t] - 1);
+    plat_unlock(f);
 }
 void eng_play(int on)
 {
     uint32_t f = plat_lock();
+    int t;
+    for (t = 0; t < NTRK; t++) {
+        swing_wait[t] = -1.0f;
+        seq_release(t);
+        step[t] = -1;
+        step_tick[t] = 0;
+    }
     if (on) {
-        step = -1;
-        step_tick = 0;
         acc = spt;                       /* the first step at once */
         playing = 1;
     } else {
         playing = 0;
-        swing_wait = -1.0f;
-        seq_release();
-        step = -1;
     }
     plat_unlock(f);
 }
 int eng_playing(void) { return playing; }
-int eng_seq_step(void) { return playing ? step : -1; }
-int eng_seq_nearest(void)
+int eng_seq_step(int t) { return playing && t >= 0 && t < NTRK ? step[t] : -1; }
+int eng_seq_nearest(int t)
 {
-    int st = step;
-    if (!playing || st < 0)
+    int st;
+    if (!playing || t < 0 || t >= NTRK || (st = step[t]) < 0)
         return -1;
-    if (step_tick * 2 >= RATE_TICKS[rate])   /* past half the step: the next one */
-        st = st + 1 >= seq_len() ? 0 : st + 1;
+    if (step_tick[t] * 2 >= RATE_TICKS[trate[t]])   /* past half the step: the next one */
+        st = st + 1 >= tlen[t] ? 0 : st + 1;
     return st;
 }
 void eng_tempo(float b, float sw)
@@ -400,5 +433,13 @@ void eng_arp_hold(int on)
     plat_unlock(f);
 }
 int eng_arp_on(void) { return arp_on_; }
+void eng_arp_track(int t)
+{
+    uint32_t f = plat_lock();
+    if ((uint8_t)(t & 3) != arp_trk)
+        arp_release();
+    arp_trk = (uint8_t)(t & 3);
+    plat_unlock(f);
+}
 int eng_arp_note(void) { return arp_on_ ? arp_shown : -1; }
 uint32_t eng_arp_steps(void) { return arp_steps_n; }

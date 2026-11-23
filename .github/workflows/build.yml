@@ -40,6 +40,7 @@ jobs:
           build/host/prophet67_host tests/seq.txt build/host
           build/host/prophet67_host tests/stress.txt build/host
           build/host/prophet67_host tests/split.txt build/host
+          build/host/prophet67_host tests/tracks.txt build/host
 
       - name: JieLi toolchain
         run: fm1-base/tools/get_toolchain.sh "$HOME/.jieli"

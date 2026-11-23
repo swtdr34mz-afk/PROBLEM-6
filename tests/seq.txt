@@ -3,7 +3,7 @@ wait 2000
 # step record: a chord, a note, a rest, a tie
 tap REC
 expect rec 1
-expect page 15
+expect page 24
 expect cursor 0
 key w0 down
 key w2 down

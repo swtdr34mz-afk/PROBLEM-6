@@ -22,6 +22,10 @@
 
 #define ENG_SR 44100.0f
 #define NVOICE 7
+#define NTRK 4                          /* the tracks: each its own sound and its own line in the sequencer */
+/* a note's id: its source (keys, sequencer, arp), its track, its note */
+#define TRK_ID(t) ((t) << 10)
+#define ID_TRK(id) (((id) >> 10) & 3)
 
 /* ---------------------------------------------------------------- parameters --- */
 enum {
@@ -88,7 +92,9 @@ extern const patch_t FACTORY[NPRESETS];
 
 /* --------------------------------------------------------------- the engine --- */
 void eng_init(void);
-void eng_patch(const uint8_t *p);       /* the sound (a patch's NPARAM bytes); any time */
+void eng_patch(const uint8_t *p);       /* the sound (a patch's NPARAM bytes) for every track; any time */
+void eng_patch_trk(int t, const uint8_t *p);   /* track t's sound (the effects: track 0's, the song's) */
+void eng_view(int t);                   /* the track the screen follows (eng_lfo) */
 /* notes: id names the note (the same id again strikes it again), note a MIDI note, vel 0..1 */
 void eng_note_on(int id, int note, float vel);
 void eng_note_on_gain(int id, int note, float vel, float gain);   /* with its own level (the split's BALANCE) */
@@ -110,6 +116,7 @@ int eng_ducked(void);
 float eng_voice_env(int v);             /* voice v's amp envelope 0..1 (its LED) */
 float eng_voice_press(int v);           /* its pressure now 0..1 (smoothed) */
 int eng_voice_note(int v);              /* the note it plays (-1: none) */
+int eng_voice_track(int v);             /* the track whose sound it plays (-1: silent) */
 int eng_voices(void);                   /* voices sounding */
 uint32_t eng_notes(void);               /* notes started since the start */
 uint32_t eng_steals(void);              /* voices taken from a note still sounding */
@@ -121,21 +128,27 @@ float eng_lfo(int which);               /* LFO 1 (0) or 2 (1) now, -1..1 */
 /* ---------------------------------------------------- the clock, sequencer and arp --- */
 /* A 24-per-quarter clock runs in the render: from BPM, or MIDI clock coming in. The sequencer and the arp step on it,
  * on time to within an audio block (2.9 ms). */
-#define SEQ_BARS 16
-#define SEQ_STEPS (SEQ_BARS * 16)
+/* The sequencer: four tracks of 64 steps, each track its own line (and its own sound, its notes' ids carry it), its
+ * own length, rate, transpose and mute. A step: a note or a chord, its velocity, its gate */
+#define TRK_STEPS 64
 #define SEQ_POLY 7                      /* notes a step holds */
 #define SN_NONE 0                       /* an empty slot */
 #define SN_TIE 1                        /* note slot 0 = TIE: the step holds the step before's notes on */
 typedef struct {
-    uint8_t note[SEQ_STEPS][SEQ_POLY];  /* 0: none, 1: tie (slot 0), else the MIDI note */
+    uint8_t note[SEQ_POLY];             /* 0: none, 1: tie (slot 0), else the MIDI note */
+    uint8_t vel;                        /* 1..127 (0: 100) */
+    uint8_t gate;                       /* 5..100: % of the step the notes sound (0: 50) */
+} step_t;
+typedef struct {
+    step_t st[NTRK][TRK_STEPS];
 } seq_t;
 enum { RATE_8, RATE_8T, RATE_16, RATE_16T, RATE_32, NRATE };
 void eng_seq_bind(const seq_t *s);      /* the sequence the sequencer plays */
-void eng_seq_set(int bars, int rate, float gate, int transpose);
+void eng_trk_set(int t, int len, int rate, int transpose, int mute);   /* a track: 1..64 steps, RATE_*, +-24, muted */
 void eng_play(int on);                  /* the sequencer from the top / stopped */
 int eng_playing(void);
-int eng_seq_step(void);                 /* the step playing (-1: stopped) */
-int eng_seq_nearest(void);              /* the step a note played now belongs to (quantised), -1 stopped */
+int eng_seq_step(int t);                /* track t's step playing (-1: stopped) */
+int eng_seq_nearest(int t);             /* its step a note played now belongs to (quantised), -1 stopped */
 void eng_tempo(float bpm, float swing); /* BPM, swing 0..0.5 */
 float eng_bpm(void);                    /* the tempo now (heard in MIDI clock, if it comes) */
 enum { CLK_TICK, CLK_START, CLK_STOP, CLK_CONT };
@@ -148,5 +161,6 @@ void eng_arp(int on, int mode, int rate, int octaves, float gate);
 void eng_arp_key(int note, int down, float vel);   /* a key held for the arp (the arp plays them) */
 void eng_arp_hold(int on);              /* HOLD: the notes stay after the keys are let go (until a new chord) */
 int eng_arp_on(void);
+void eng_arp_track(int t);              /* the track the arp plays (its sound) */
 int eng_arp_note(void);                 /* the arp's last note (-1 none) */
 uint32_t eng_arp_steps(void);

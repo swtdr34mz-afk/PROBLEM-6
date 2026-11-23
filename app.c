@@ -22,10 +22,12 @@
  *                   again CHORUS (MIX, RATE, DEPTH, DISTORT)
  *   GLO             VOICE (GLIDE, VELOCITY, UNISON, BEND); again CLOCK (BPM, SWING, KEY VEL, MIDI CH)
  *   ARP             the arp on, and its page (MODE, RATE, OCTAVES, GATE); again: off. Held 1 s: HOLD
- *   SEQ             SEQUENCER page (BARS, RATE, GATE, TRANSPOSE)
- *   PLAY            the sequencer from the top / stop
- *   REC             record: stopped, step by step (a chord at a time; PRESET moves the step, SEQ a rest, SAVE a tie);
- *                   playing, live into the nearest steps. Held 1 s: the sequence cleared
+ *   SEQ             TRACK page (TRACK 1-4: the one the keys play, the pages edit, REC writes; LENGTH 1-64, RATE,
+ *                   TRANSPOSE); again MUTES (each track)
+ *   PLAY            the four tracks from the top / stop
+ *   REC             record into the selected track: stopped, step by step on the STEP EDIT page (a chord at a time,
+ *                   at its velocity; K1 / PRESET move the step, K2 its VELOCITY, K3 its GATE, K4 its NOTE; SEQ a rest,
+ *                   SAVE a tie); playing, live into the nearest steps. Held 1 s: the track cleared
  *   SAVE            the edited preset kept in its slot; held + PRESET: into another slot (on letting go)
  *   MIDI in (USB, TRS): notes, pitch bend, CC 1 (mod wheel), 64 (sustain), 74 (cutoff), clock, START, STOP.
  *   MIDI out (USB): the keys' notes. */
@@ -38,7 +40,10 @@
 #define SET_MAGIC_V3 0x33374850u         /* "PH73": v0.3/0.4's: 62 parameters a preset */
 #define SET_MAGIC_V2 0x32374850u         /* "PH72": v0.2's: 62, CUTOFF 0..127 */
 #define SET_MAGIC_V1 0x31374850u         /* "PH71": v0.1's: 54, CUTOFF 0..127 */
-#define SEQ_MAGIC 0x51534850u            /* "PHSQ" */
+#define SEQ_MAGIC_V1 0x51534850u         /* "PHSQ": up to v1.0, one line of 16 bars of chords */
+#define SONG_MAGIC 0x34534850u           /* "PHS4": v1.1, four tracks of 64 steps, each its own sound */
+#define OLD_BARS 16
+#define FX_PARAM(p) ((p) == P_CH_MIX || (p) == P_CH_RATE || (p) == P_CH_DEPTH || (p) == P_DIST || ((p) >= P_RV_TYPE && (p) <= P_SP_PRE) || ((p) >= P_DL_TIME_L && (p) <= P_DL_SYNC))
 
 /* the LOW SPLIT's scales (OFFWORLD's) */
 typedef struct {
@@ -85,16 +90,31 @@ typedef struct {
     int8_t balance;                      /* -50 (the left only) .. +50 (the right only) */
 } settings_t;
 _Static_assert(sizeof(settings_t) <= PLAT_STORE_MAX, "the settings outgrew a store object");
+/* the song: four tracks, each its own sound (a preset, as edited), its length, rate, transpose, mute; their steps.
+ * The effects are the song's: the same in every track's sound, from track 1's preset (or as turned on the FX pages) */
+typedef struct {
+    patch_t snd;                         /* its sound, as edited */
+    uint8_t pre;                         /* the preset it came from (SAVE's slot, HOME's revert) */
+    uint8_t len, rate, mute;             /* 1..64 steps, RATE_*, muted */
+    int8_t tr;                           /* transpose -24..+24 */
+    uint8_t edited;                      /* its sound changed since the preset */
+    uint8_t rsv[2];
+} track_t;
 typedef struct {
     uint32_t magic;
+    uint8_t trk;                         /* the track selected: the keys play it, the pages edit it, REC writes it */
+    uint8_t rsv[3];
+    track_t t[NTRK];
     seq_t s;
 } seqrec_t;
-_Static_assert(sizeof(seqrec_t) <= PLAT_STORE_MAX, "the sequence outgrew a store object");
+_Static_assert(sizeof(seqrec_t) <= PLAT_STORE_MAX, "the song outgrew a store object");
 
 static settings_t set;
 static seqrec_t sq;
-static patch_t ed;                       /* the preset as edited (what sounds) */
-static uint8_t edited;
+#define ed (sq.t[sq.trk].snd)            /* the selected track's sound, as edited (what the pages show and turn) */
+#define edited (sq.t[sq.trk].edited)
+#define CUR (sq.t[sq.trk].pre)           /* its preset */
+static void song_load(void);
 static uint8_t set_dirty, seq_dirty, save_now;
 static uint32_t silent_since, save_at;
 static uint32_t dirty_at, seq_dirty_at;
@@ -104,7 +124,10 @@ static const char *const NOTE_NAME[12] = {"C", "C#", "D", "D#", "E", "F", "F#", 
 static const char *const RATE_NAME[NRATE] = {"1/8", "1/8T", "1/16", "1/16T", "1/32"};
 static const char *const ARP_NAME[NARP] = {"UP", "DOWN", "UP-DN", "RANDOM", "PLAYED"};
 #define KEY_BASE 53                      /* the lowest key, F3, at octave 0 */
-#define SRC_KEY_ID(n) (n)                /* the keys' and MIDI's notes: their ids are the notes (engine.c's SRC_KEY) */
+/* the keys' and MIDI's notes: their ids are the notes (engine.c's SRC_KEY) on the track they were played on (the
+ * track selected then: a note let go after the track changed still finds its voice) */
+static volatile uint8_t note_trk[128];
+#define SRC_KEY_ID(n) ((n) | TRK_ID(note_trk[(n) & 127]))
 static float u7f(int v) { return (float)v * (1.0f / 127.0f); }
 static uint32_t text_len_(const char *s)  /* (no libc strlen on the device) */
 {
@@ -119,7 +142,13 @@ static void sound_globals(void)
     eng_tempo((float)set.bpm, (float)set.swing * 0.01f);
     eng_arp(eng_arp_on(), set.arp_mode, set.arp_rate, set.arp_oct, (float)set.arp_gate * 0.01f);
     eng_arp_hold(set.arp_hold);
-    eng_seq_set(set.seq_bars, set.seq_rate, (float)set.seq_gate * 0.01f, set.seq_tr);
+    {
+        int t;
+        for (t = 0; t < NTRK; t++)
+            eng_trk_set(t, sq.t[t].len, sq.t[t].rate, sq.t[t].tr, sq.t[t].mute);
+    }
+    eng_view(sq.trk);
+    eng_arp_track(sq.trk);
 }
 
 static void settings_defaults(void)
@@ -149,7 +178,7 @@ static int settings_ok(void)
     if (set.magic != SET_MAGIC || set.cur >= NPRESETS || set.oct < -3 || set.oct > 3 || set.bpm < 30 || set.bpm > 300
         || set.swing > 50 || set.kvel > 127 || set.mch > 16 || set.arp_mode >= NARP
         || set.arp_rate >= NRATE || set.arp_oct < 1 || set.arp_oct > 4 || set.arp_gate < 5 || set.arp_gate > 100
-        || set.seq_bars < 1 || set.seq_bars > SEQ_BARS || set.seq_rate >= NRATE || set.seq_gate < 5
+        || set.seq_bars < 1 || set.seq_bars > OLD_BARS || set.seq_rate >= NRATE || set.seq_gate < 5
         || set.seq_gate > 100 || set.seq_tr < -24 || set.seq_tr > 24 || set.split_oct > 3 || set.split_key < 1
         || set.split_key >= NKEYS || set.scale_l > NSCALE || set.scale_r > NSCALE || set.key > 11
         || set.follow >= NFOLLOW || set.lowhold > 1 || set.balance < -50 || set.balance > 50)
@@ -238,11 +267,75 @@ static void settings_load(void)
     }
     if ((n != (int)sizeof set || !settings_ok()) && !(n > 4 && settings_old(raw, n)))
         settings_defaults();
-    if (plat_store_load(OBJ_SEQ, &sq, sizeof sq) != (int)sizeof sq || sq.magic != SEQ_MAGIC) {
-        memset(&sq, 0, sizeof sq);
-        sq.magic = SEQ_MAGIC;
+    song_load();
+}
+
+/* a fresh song: track 1 the preset playing, then a bass, a pluck and a lead, their lines empty, a bar each */
+static void song_defaults(void)
+{
+    static const uint8_t PRE[NTRK] = {0, 3, 8, 2};   /* (POLY PAD, FAT BASS, PLUCK, SYNC LEAD) */
+    int t, k;
+    memset(&sq, 0, sizeof sq);
+    sq.magic = SONG_MAGIC;
+    for (t = 0; t < NTRK; t++) {
+        sq.t[t].pre = t == 0 ? set.cur : PRE[t];
+        sq.t[t].snd = set.pre[sq.t[t].pre];
+        sq.t[t].len = 16;
+        sq.t[t].rate = RATE_16;
+        if (t)                           /* the effects: track 1's, in every sound */
+            for (k = 0; k < NPARAM; k++)
+                if (FX_PARAM(k))
+                    sq.t[t].snd.p[k] = sq.t[0].snd.p[k];
     }
 }
+
+static int song_ok(void)
+{
+    int t, k, i;
+    if (sq.magic != SONG_MAGIC || sq.trk >= NTRK)
+        return 0;
+    for (t = 0; t < NTRK; t++) {
+        const track_t *tr = &sq.t[t];
+        if (tr->pre >= NPRESETS || tr->len < 1 || tr->len > TRK_STEPS || tr->rate >= NRATE || tr->mute > 1 || tr->tr < -24
+            || tr->tr > 24)
+            return 0;
+        for (k = 0; k < NPARAM; k++)
+            if (tr->snd.p[k] > PARAMS[k].max)
+                return 0;
+        for (i = 0; i < TRK_STEPS; i++)
+            if (sq.s.st[t][i].vel > 127 || sq.s.st[t][i].gate > 100)
+                return 0;
+    }
+    return 1;
+}
+
+/* the song as kept; or v1.0's sequence, into track 1 (its first 64 steps, its bars, rate, gate, transpose) */
+static void song_load(void)
+{
+    static uint8_t raw[PLAT_STORE_MAX];
+    int n = plat_store_load(OBJ_SEQ, raw, sizeof raw);
+    if (n == (int)sizeof sq) {
+        memcpy(&sq, raw, sizeof sq);
+        if (song_ok())
+            return;
+    }
+    song_defaults();
+    if (n == 4 + OLD_BARS * 16 * SEQ_POLY
+        && ((uint32_t)raw[0] | (uint32_t)raw[1] << 8 | (uint32_t)raw[2] << 16 | (uint32_t)raw[3] << 24) == SEQ_MAGIC_V1) {
+        int i, k, len = set.seq_bars * 16;
+        for (i = 0; i < TRK_STEPS; i++) {
+            for (k = 0; k < SEQ_POLY; k++)
+                sq.s.st[0][i].note[k] = raw[4 + i * SEQ_POLY + k];
+            sq.s.st[0][i].gate = set.seq_gate;
+        }
+        sq.t[0].len = (uint8_t)(len > TRK_STEPS ? TRK_STEPS : len);
+        sq.t[0].rate = set.seq_rate;
+        sq.t[0].tr = set.seq_tr;
+        seq_dirty = 1;                   /* (kept in the new form soon) */
+    }
+}
+
+static void seq_changed(void);
 
 static void dirty(void)
 {
@@ -268,23 +361,69 @@ static void seq_save(void)
         seq_dirty = 0;
 }
 
+/* the selected track's sound changed: the engine hears it, the song keeps it */
+static void sound_apply(void)
+{
+    eng_patch_trk(sq.trk, ed.p);
+    seq_changed();
+}
+
+/* a preset into the selected track. Into track 1: its effects become the song's (every track's); into another: the
+ * song's effects stay */
 static void preset_load(int i)
 {
+    int t, k;
+    CUR = (uint8_t)i;
     set.cur = (uint8_t)i;
     ed = set.pre[i];
     edited = 0;
-    eng_patch(ed.p);
+    for (k = 0; k < NPARAM; k++)
+        if (FX_PARAM(k)) {
+            if (sq.trk == 0)
+                for (t = 1; t < NTRK; t++)
+                    sq.t[t].snd.p[k] = ed.p[k];
+            else
+                ed.p[k] = sq.t[0].snd.p[k];
+        }
+    if (sq.trk == 0)
+        for (t = 1; t < NTRK; t++)
+            eng_patch_trk(t, sq.t[t].snd.p);
+    sound_apply();
+}
+
+/* every track's sound to the engine (the start, a backup restored) */
+static void song_apply(void)
+{
+    int t;
+    for (t = NTRK - 1; t >= 0; t--)      /* (track 1 last: its effects) */
+        eng_patch_trk(t, sq.t[t].snd.p);
+    eng_seq_bind(&sq.s);
 }
 
 static void latched_release(uint32_t keys_down);
 static void latch_down(void);
+static void track_select(int t);
+
+/* a step's velocity and gate as heard (0 in the record: the defaults), its lowest note (0: none) */
+static int step_vel(const step_t *sp) { return sp->vel ? sp->vel : 100; }
+static int step_gate(const step_t *sp) { return sp->gate ? sp->gate : 50; }
+static int step_low(const step_t *sp)
+{
+    int k, lo = 0;
+    for (k = 0; k < SEQ_POLY; k++)
+        if (sp->note[k] >= 12 && (lo == 0 || sp->note[k] < lo))
+            lo = sp->note[k];
+    return lo;
+}
 
 /* -------------------------------------------------------------------- pages --- */
 /* a knob: a parameter of the preset (0 .. NPARAM-1), or one of these (the settings, kept across presets) */
-enum { G_BPM = 0x100, G_SWING, G_KVEL, G_MCH, G_ARP_MODE, G_ARP_RATE, G_ARP_OCT, G_ARP_GATE, G_SEQ_BARS, G_SEQ_RATE,
-       G_SEQ_GATE, G_SEQ_TR, G_SPLIT, G_POINT, G_SCALE_L, G_SCALE_R, G_KEY, G_FOLLOW, G_LOWHOLD, G_BALANCE };
+enum { G_BPM = 0x100, G_SWING, G_KVEL, G_MCH, G_ARP_MODE, G_ARP_RATE, G_ARP_OCT, G_ARP_GATE, G_TRK, G_TLEN, G_TRATE,
+       G_TTR, G_SPLIT, G_POINT, G_SCALE_L, G_SCALE_R, G_KEY, G_FOLLOW, G_LOWHOLD, G_BALANCE, G_MUTE1, G_MUTE2, G_MUTE3,
+       G_MUTE4, G_STEP, G_SVEL, G_SGATE, G_SNOTE };
 enum { PG_FILTER, PG_FILTER2, PG_OSC1, PG_OSC2, PG_MIXER, PG_FENV, PG_AENV, PG_LFO, PG_POLY, PG_FXA, PG_FXB, PG_SPACE,
-       PG_VOICE, PG_CLOCK, PG_ARP, PG_SEQ, PG_LFO2, PG_LSYNC, PG_SPLIT, PG_SPLIT2, PG_AT, PG_DELAY, PG_DMOD, NPAGES };
+       PG_VOICE, PG_CLOCK, PG_ARP, PG_SEQ, PG_LFO2, PG_LSYNC, PG_SPLIT, PG_SPLIT2, PG_AT, PG_DELAY, PG_DMOD, PG_MUTE,
+       PG_STEP, NPAGES };
 typedef struct {
     const char *title;
     uint8_t button;
@@ -314,7 +453,9 @@ static const page_t PAGES[NPAGES] = {
     [PG_AT] = {"AFTERTOUCH", B_GLO, PG_CLOCK, {P_AT_DEST, P_AT_AMT, P_AT_CURVE, P_AT_SMOOTH}},
     [PG_CLOCK] = {"CLOCK", B_GLO, PG_VOICE, {G_BPM, G_SWING, G_KVEL, G_MCH}},
     [PG_ARP] = {"ARPEGGIATOR", B_ARP, PG_ARP, {G_ARP_MODE, G_ARP_RATE, G_ARP_OCT, G_ARP_GATE}},
-    [PG_SEQ] = {"SEQUENCER", B_SEQ, PG_SEQ, {G_SEQ_BARS, G_SEQ_RATE, G_SEQ_GATE, G_SEQ_TR}},
+    [PG_SEQ] = {"TRACK", B_SEQ, PG_MUTE, {G_TRK, G_TLEN, G_TRATE, G_TTR}},
+    [PG_MUTE] = {"MUTES", B_SEQ, PG_SEQ, {G_MUTE1, G_MUTE2, G_MUTE3, G_MUTE4}},
+    [PG_STEP] = {"STEP EDIT", B_SEQ, PG_SEQ, {G_STEP, G_SVEL, G_SGATE, G_SNOTE}},
 };
 
 /* ----------------------------------------------------------------------- UI --- */
@@ -326,7 +467,8 @@ static struct {
     uint8_t rec;                         /* recording */
     int16_t cursor;                      /* step record: the step */
     uint32_t chord_keys;                 /* step record: the keys of the chord being gathered */
-    uint8_t chord[SEQ_POLY], chord_n;
+    uint8_t chord[SEQ_POLY], chord_n, chord_vel;
+    uint8_t last_vel, last_gate;         /* step edit: what the last step was given (new steps take it) */
     uint8_t rec_held;                    /* step record: fingers down (keys and MIDI) */
     uint32_t home_t, rec_t, arp_t;       /* when HOME, REC, ARP went down (0: not, or used) */
     uint8_t save_down;
@@ -409,11 +551,14 @@ static int g_max(int code)
     case G_KVEL: return 127;
     case G_MCH: return 16;
     case G_ARP_MODE: return NARP - 1;
-    case G_ARP_RATE: case G_SEQ_RATE: return NRATE - 1;
+    case G_ARP_RATE: case G_TRATE: return NRATE - 1;
     case G_ARP_OCT: return 4;
-    case G_ARP_GATE: case G_SEQ_GATE: return 100;
-    case G_SEQ_BARS: return SEQ_BARS;
-    case G_SEQ_TR: return 24;
+    case G_ARP_GATE: case G_SGATE: return 100;
+    case G_TRK: return NTRK;
+    case G_TLEN: return TRK_STEPS;
+    case G_TTR: return 24;
+    case G_MUTE1: case G_MUTE2: case G_MUTE3: case G_MUTE4: return 1;
+    case G_STEP: return sq.t[sq.trk].len;
     case G_SPLIT: return 3;
     case G_POINT: return NKEYS - 1;
     case G_SCALE_L: case G_SCALE_R: return NSCALE;
@@ -428,10 +573,11 @@ static int g_min(int code)
 {
     switch (code) {
     case G_BPM: return 30;
-    case G_ARP_OCT: case G_SEQ_BARS: case G_POINT: return 1;
+    case G_ARP_OCT: case G_TRK: case G_TLEN: case G_POINT: case G_STEP: case G_SVEL: return 1;
     case G_BALANCE: return -50;
-    case G_ARP_GATE: case G_SEQ_GATE: return 5;
-    case G_SEQ_TR: return -24;
+    case G_ARP_GATE: case G_SGATE: return 5;
+    case G_TTR: return -24;
+    case G_SNOTE: return 12;
     }
     return 0;
 }
@@ -448,10 +594,15 @@ static int knob_get(int code)
     case G_ARP_RATE: return set.arp_rate;
     case G_ARP_OCT: return set.arp_oct;
     case G_ARP_GATE: return set.arp_gate;
-    case G_SEQ_BARS: return set.seq_bars;
-    case G_SEQ_RATE: return set.seq_rate;
-    case G_SEQ_GATE: return set.seq_gate;
-    case G_SEQ_TR: return set.seq_tr;
+    case G_TRK: return sq.trk + 1;
+    case G_TLEN: return sq.t[sq.trk].len;
+    case G_TRATE: return sq.t[sq.trk].rate;
+    case G_TTR: return sq.t[sq.trk].tr;
+    case G_MUTE1: case G_MUTE2: case G_MUTE3: case G_MUTE4: return sq.t[code - G_MUTE1].mute;
+    case G_STEP: return ui.cursor + 1;
+    case G_SVEL: return step_vel(&sq.s.st[sq.trk][ui.cursor]);
+    case G_SGATE: return step_gate(&sq.s.st[sq.trk][ui.cursor]);
+    case G_SNOTE: return step_low(&sq.s.st[sq.trk][ui.cursor]);
     case G_SPLIT: return set.split_oct;
     case G_POINT: return set.split_key;
     case G_SCALE_L: return set.scale_l;
@@ -468,7 +619,56 @@ static void knob_put(int code, int v)
     if (code < NPARAM) {
         ed.p[code] = (uint8_t)v;
         edited = 1;
-        eng_patch(ed.p);
+        if (FX_PARAM(code)) {            /* the effects: the song's, in every track's sound */
+            int t;
+            for (t = 0; t < NTRK; t++)
+                sq.t[t].snd.p[code] = (uint8_t)v;
+            eng_patch_trk(0, sq.t[0].snd.p);
+        }
+        sound_apply();
+        return;
+    }
+    if (code >= G_TRK && code <= G_TTR) {
+        track_t *tr = &sq.t[sq.trk];
+        if (code == G_TRK)
+            track_select(v - 1);
+        else if (code == G_TLEN)
+            tr->len = (uint8_t)v;
+        else if (code == G_TRATE)
+            tr->rate = (uint8_t)v;
+        else
+            tr->tr = (int8_t)v;
+        if (ui.cursor >= sq.t[sq.trk].len)
+            ui.cursor = (int16_t)(sq.t[sq.trk].len - 1);
+        sound_globals();
+        seq_changed();
+        return;
+    }
+    if (code >= G_MUTE1 && code <= G_MUTE4) {
+        sq.t[code - G_MUTE1].mute = (uint8_t)v;
+        sound_globals();
+        seq_changed();
+        return;
+    }
+    if (code >= G_STEP) {
+        step_t *sp = &sq.s.st[sq.trk][ui.cursor];
+        if (code == G_STEP) {
+            ui.cursor = (int16_t)(v - 1);
+        } else if (code == G_SVEL) {
+            sp->vel = (uint8_t)v;
+            ui.last_vel = (uint8_t)v;
+        } else if (code == G_SGATE) {
+            sp->gate = (uint8_t)v;
+            ui.last_gate = (uint8_t)v;
+        } else {                         /* NOTE: the step's notes moved together (its lowest to here) */
+            int d = v - step_low(sp), k;
+            for (k = 0; k < SEQ_POLY; k++)
+                if (sp->note[k] >= 12 && sp->note[k] + d >= 12 && sp->note[k] + d <= 127)
+                    sp->note[k] = (uint8_t)(sp->note[k] + d);
+        }
+        if (code != G_STEP)
+            seq_changed();
+        ui.redraw = 1;
         return;
     }
     switch (code) {
@@ -480,10 +680,6 @@ static void knob_put(int code, int v)
     case G_ARP_RATE: set.arp_rate = (uint8_t)v; break;
     case G_ARP_OCT: set.arp_oct = (uint8_t)v; break;
     case G_ARP_GATE: set.arp_gate = (uint8_t)v; break;
-    case G_SEQ_BARS: set.seq_bars = (uint8_t)v; break;
-    case G_SEQ_RATE: set.seq_rate = (uint8_t)v; break;
-    case G_SEQ_GATE: set.seq_gate = (uint8_t)v; break;
-    case G_SEQ_TR: set.seq_tr = (int8_t)v; break;
     case G_SPLIT: set.split_oct = (uint8_t)v; break;
     case G_POINT: set.split_key = (uint8_t)v; break;
     case G_SCALE_L: set.scale_l = (uint8_t)v; break;
@@ -504,9 +700,10 @@ static void knob_put(int code, int v)
 }
 static const char *knob_name(int code)
 {
-    static const char *const G[] = {"BPM", "SWING", "KEY VEL", "MIDI CH", "MODE", "RATE", "OCTAVES", "GATE", "BARS",
-                                    "RATE", "GATE", "TRANSPOSE", "SPLIT", "POINT", "SCALE L", "SCALE R", "KEY",
-                                    "FOLLOW", "LOW HOLD", "BALANCE"};
+    static const char *const G[] = {"BPM", "SWING", "KEY VEL", "MIDI CH", "MODE", "RATE", "OCTAVES", "GATE", "TRACK",
+                                    "LENGTH", "RATE", "TRANSPOSE", "SPLIT", "POINT", "SCALE L", "SCALE R", "KEY",
+                                    "FOLLOW", "LOW HOLD", "BALANCE", "TRACK 1", "TRACK 2", "TRACK 3", "TRACK 4", "STEP",
+                                    "VELOCITY", "GATE", "NOTE"};
     return code < NPARAM ? PARAMS[code].name : G[code - G_BPM];
 }
 static int rate_sync(int code)            /* an LFO's RATE while it is synced: its SYNC parameter (else -1) */
@@ -537,10 +734,25 @@ static void knob_text(int code, char *b)
         return;
     }
     switch (code) {
-    case G_SWING: case G_ARP_GATE: case G_SEQ_GATE:
+    case G_SWING: case G_ARP_GATE:
         int_text(v, b);
         text_cat(b, "%");
         break;
+    case G_SGATE:
+        if (sq.s.st[sq.trk][ui.cursor].note[0] == SN_TIE)
+            text_cat(b, "TIE");
+        else {
+            int_text(v, b);
+            text_cat(b, "%");
+        }
+        break;
+    case G_SNOTE:
+        if (v < 12)
+            text_cat(b, "--");
+        else
+            note_text(v, b);
+        break;
+    case G_MUTE1: case G_MUTE2: case G_MUTE3: case G_MUTE4: text_cat(b, v ? "MUTE" : "ON"); break;
     case G_MCH:
         if (v == 0)
             text_cat(b, "ALL");
@@ -548,8 +760,8 @@ static void knob_text(int code, char *b)
             int_text(v, b);
         break;
     case G_ARP_MODE: text_cat(b, ARP_NAME[v]); break;
-    case G_ARP_RATE: case G_SEQ_RATE: text_cat(b, RATE_NAME[v]); break;
-    case G_SEQ_TR: case G_BALANCE:
+    case G_ARP_RATE: case G_TRATE: text_cat(b, RATE_NAME[v]); break;
+    case G_TTR: case G_BALANCE:
         if (v > 0)
             text_cat(b, "+");
         int_text(v, b + (v > 0));
@@ -583,8 +795,8 @@ static int knob_choice(int code)         /* one detent, one value (no accelerati
 {
     if (code < NPARAM)
         return PARAMS[code].kind == PK_CHOICE || PARAMS[code].max <= 48;
-    return code != G_BPM && code != G_KVEL && code != G_SWING && code != G_ARP_GATE && code != G_SEQ_GATE
-           && code != G_BALANCE;
+    return code != G_BPM && code != G_KVEL && code != G_SWING && code != G_ARP_GATE && code != G_SGATE
+           && code != G_BALANCE && code != G_SVEL;
 }
 static int knob_centred(int code)        /* a bipolar knob: it rests at its centre */
 {
@@ -672,28 +884,39 @@ static void page_set(int pg)
 }
 
 /* ------------------------------------------------------------- the sequence --- */
-static int seq_len(void) { return set.seq_bars * 16; }
+/* (the selected track's) */
+static int seq_len(void) { return sq.t[sq.trk].len; }
+static step_t *step_at(int st) { return &sq.s.st[sq.trk][st]; }
 
-static void step_write(int st, const uint8_t *notes, int n)
+static void step_write(int st, const uint8_t *notes, int n, int vel)
 {
+    step_t *sp = step_at(st);
     int i;
     for (i = 0; i < SEQ_POLY; i++)
-        sq.s.note[st][i] = (uint8_t)(i < n ? notes[i] : SN_NONE);
+        sp->note[i] = (uint8_t)(i < n ? notes[i] : SN_NONE);
+    if (vel > 0)
+        sp->vel = (uint8_t)vel;
+    if (!sp->gate)
+        sp->gate = ui.last_gate ? ui.last_gate : 50;
     seq_changed();
 }
 
-static void step_add(int st, int note)   /* live: a note into a step (beside what is there) */
+static void step_add(int st, int note, int vel)   /* live: a note into a step (beside what is there) */
 {
-    uint8_t *s = sq.s.note[st];
-    int i;
-    if (s[0] == SN_TIE)
-        s[0] = SN_NONE;
+    step_t *sp = step_at(st);
+    int i, empty = step_low(sp) == 0;
+    if (sp->note[0] == SN_TIE)
+        sp->note[0] = SN_NONE;
     for (i = 0; i < SEQ_POLY; i++)
-        if (s[i] == note)
+        if (sp->note[i] == note)
             return;
     for (i = 0; i < SEQ_POLY; i++)
-        if (s[i] < 12) {
-            s[i] = (uint8_t)note;
+        if (sp->note[i] < 12) {
+            sp->note[i] = (uint8_t)note;
+            if (empty || vel > sp->vel)
+                sp->vel = (uint8_t)vel;
+            if (!sp->gate)
+                sp->gate = ui.last_gate ? ui.last_gate : 50;
             seq_changed();
             return;
         }
@@ -707,21 +930,25 @@ static void cursor_move(int d)
 }
 
 /* a note down / up for the recording (keys and MIDI): live into the nearest step, or a step's chord */
-static void rec_down(int note)
+static void rec_down(int note, int vel)
 {
     if (!ui.rec)
         return;
     if (eng_playing()) {
-        int st = eng_seq_nearest();
+        int st = eng_seq_nearest(sq.trk);
         if (st >= 0)
-            step_add(st, note);
+            step_add(st, note, vel);
         return;
     }
-    if (ui.rec_held == 0)
+    if (ui.rec_held == 0) {
         ui.chord_n = 0;
+        ui.chord_vel = 0;
+    }
     ui.rec_held++;
     if (ui.chord_n < SEQ_POLY)
         ui.chord[ui.chord_n++] = (uint8_t)note;
+    if (vel > ui.chord_vel)
+        ui.chord_vel = (uint8_t)vel;
 }
 
 static void rec_up(void)
@@ -729,14 +956,14 @@ static void rec_up(void)
     if (!ui.rec || eng_playing() || ui.rec_held == 0)
         return;
     if (--ui.rec_held == 0 && ui.chord_n) {   /* every finger off: the chord into the step, on to the next */
-        step_write(ui.cursor, ui.chord, ui.chord_n);
+        step_write(ui.cursor, ui.chord, ui.chord_n, ui.chord_vel);
         ui.chord_n = 0;
         cursor_move(1);
     }
 }
 
 /* MIDI's notes, for the recording (the tick puts them here, the main loop takes them) */
-static volatile uint8_t mrec_note[32], mrec_on[32];
+static volatile uint8_t mrec_note[32], mrec_on[32], mrec_vel[32];
 static volatile uint32_t mrec_w, mrec_r;
 
 /* ------------------------------------------------------------- the keys --- */
@@ -821,6 +1048,7 @@ static float zone_gain(uint32_t k)        /* BALANCE */
 
 static void note_down(int note, float vel, float gain, int from_keys)
 {
+    note_trk[note & 127] = sq.trk;
     if (eng_arp_on())
         eng_arp_key(note, 1, vel);
     else
@@ -908,7 +1136,7 @@ static void keys_input(uint32_t keys)
             key_sounding[k] = (int8_t)n;
             prs_sent[k] = 0;
             note_down(n, (float)v * (1.0f / 127.0f), zone_gain(k), 1);
-            rec_down(n);
+            rec_down(n, v);
             if (is_left(k)) {
                 left_down |= bit;
                 if (set.lowhold)
@@ -963,10 +1191,31 @@ static void pressure_input(uint32_t keys)
     }
 }
 
+/* a track selected: the keys play its sound from now (the notes held still let go on theirs), the pages show it, REC
+ * writes into it, the arp plays it */
+static void track_select(int t)
+{
+    char a[12];
+    if (t < 0 || t >= NTRK || t == sq.trk)
+        return;
+    sq.trk = (uint8_t)t;
+    set.cur = CUR;
+    ui.chord_n = 0;
+    if (ui.cursor >= seq_len())
+        ui.cursor = 0;
+    eng_view(t);
+    eng_arp_track(t);
+    seq_changed();
+    a[0] = 0;
+    text_cat(a, "TRACK ");
+    int_text(t + 1, a + 6);
+    app_say(a, ed.name);
+}
+
 /* ----------------------------------------------------------------- buttons --- */
 static void preset_browse(int32_t e)
 {
-    int c = ui.save_down && ui.copy_to >= 0 ? ui.copy_to : set.cur;
+    int c = ui.save_down && ui.copy_to >= 0 ? ui.copy_to : CUR;
     char t[24];
     c = ((c + (e > 0 ? 1 : -1)) % NPRESETS + NPRESETS) % NPRESETS;
     if (ui.save_down) {                  /* SAVE held: where the edits go */
@@ -993,12 +1242,14 @@ static void rec_toggle(void)
     if (ui.rec) {
         if (!eng_playing()) {
             ui.cursor = 0;
-            page_set(PG_SEQ);
+            page_set(PG_STEP);
             app_say("STEP RECORD", "PLAY A CHORD");
         } else {
             app_say("RECORD", "LIVE");
         }
     } else {
+        if (ui.page == PG_STEP)
+            page_set(PG_SEQ);
         app_say("RECORD", "OFF");
     }
 }
@@ -1008,14 +1259,14 @@ static void button(uint32_t i)
     const page_t *pg = &PAGES[ui.page];
     if (ui.rec && !eng_playing()) {      /* step record: SEQ a rest, SAVE a tie */
         if (i == B_SEQ) {
-            step_write(ui.cursor, 0, 0);
+            step_write(ui.cursor, 0, 0, 0);
             cursor_move(1);
             app_say("REST", 0);
             return;
         }
         if (i == B_SAVE) {
             static const uint8_t tie[1] = {SN_TIE};
-            step_write(ui.cursor, tie, 1);
+            step_write(ui.cursor, tie, 1, 0);
             cursor_move(1);
             app_say("TIE", 0);
             return;
@@ -1085,12 +1336,14 @@ static void held_buttons(uint32_t btn)
 {
     uint32_t now = plat_ms();
     if (ui.save_down && !(btn >> B_SAVE & 1u)) {   /* SAVE let go: the preset kept (where PRESET pointed) */
-        int to = ui.copy_to >= 0 ? ui.copy_to : set.cur;
+        int to = ui.copy_to >= 0 ? ui.copy_to : CUR;
         ui.save_down = 0;
         if (ui.rec && !eng_playing())
             return;
         set.pre[to] = ed;
+        CUR = (uint8_t)to;
         set.cur = (uint8_t)to;
+        seq_changed();
         edited = 0;
         save_now = 1;                    /* asked for: written at once, the sound faded out around it */
         app_say("SAVED", ed.name);
@@ -1100,7 +1353,7 @@ static void held_buttons(uint32_t btn)
             ui.home_t = 0;
         else if (now - ui.home_t >= 1000u) {
             ui.home_t = 0;
-            preset_load(set.cur);
+            preset_load(CUR);
             app_say("REVERT", ed.name);
         }
     }
@@ -1109,11 +1362,11 @@ static void held_buttons(uint32_t btn)
             ui.rec_t = 0;
         else if (now - ui.rec_t >= 1000u) {
             ui.rec_t = 0;
-            memset(&sq.s, 0, sizeof sq.s);
+            memset(sq.s.st[sq.trk], 0, sizeof sq.s.st[sq.trk]);   /* (the selected track's) */
             seq_changed();
             ui.rec = 0;
             ui.cursor = 0;
-            app_say("SEQUENCE", "CLEARED");
+            app_say("TRACK", "CLEARED");
         }
     }
     if (ui.arp_t) {                      /* ARP held: HOLD */
@@ -1181,7 +1434,7 @@ static void input(void)
     while (mrec_r != mrec_w) {           /* MIDI notes for the recording */
         uint32_t k = mrec_r % 32u;
         if (mrec_on[k])
-            rec_down(mrec_note[k]);
+            rec_down(mrec_note[k], mrec_vel[k]);
         else
             rec_up();
         mrec_r++;
@@ -1265,6 +1518,7 @@ void app_tick(void)
             note_down((int)d1, (float)d2 * (1.0f / 127.0f), 1.0f, 0);
             if (mrec_w - mrec_r < 32u) {
                 mrec_note[mrec_w % 32u] = (uint8_t)d1;
+                mrec_vel[mrec_w % 32u] = (uint8_t)d2;
                 mrec_on[mrec_w % 32u] = 1;
                 mrec_w++;
             }
@@ -1278,7 +1532,7 @@ void app_tick(void)
         } else if (type == 0xD0u) {        /* channel pressure: every note */
             eng_press_all((float)d1 * (1.0f / 127.0f));
         } else if (type == 0xA0u) {        /* poly pressure: the note's */
-            eng_press((int)d1, (float)d2 * (1.0f / 127.0f));
+            eng_press(SRC_KEY_ID((int)d1), (float)d2 * (1.0f / 127.0f));
         } else if (type == 0xE0u) {
             eng_bend((float)((int)(d1 | d2 << 7) - 8192) * (1.0f / 8192.0f));
         } else if (type == 0xB0u) {
@@ -1461,8 +1715,8 @@ static void draw_head(void)
     cv_rect(131, 4, 1, 18, K_GREY);
     frame_rect(bx, 2, bw, 22, K_CREAM);
     frame_rect(bx + 1, 3, bw - 2, 20, K_DIM);
-    t[0] = (char)('0' + (set.cur + 1) / 10);   /* its slot, small and red, then its name */
-    t[1] = (char)('0' + (set.cur + 1) % 10);
+    t[0] = (char)('0' + (CUR + 1) / 10);   /* its slot, small and red, then its name */
+    t[1] = (char)('0' + (CUR + 1) % 10);
     t[2] = 0;
     cv_text(bx + 4, 8, &FONT_XS, t, K_RED);
     nf = text_w(&FONT_B, ed.name) <= bw - 32 ? &FONT_B : &FONT_XS;
@@ -1694,19 +1948,26 @@ static void page_visual(int32_t x, int32_t y, int32_t w, int32_t h)
             cv_text(x + 150, y + 4, &FONT_B, "HOLD", K_CREAM);
         break;
     }
-    case PG_SEQ: {                       /* the bars: those with notes, the one playing */
-        int b, st = eng_seq_step();
-        for (b = 0; b < SEQ_BARS; b++) {
-            int32_t bx = x + 10 + b * 13;
-            int has = 0, k;
-            for (k = 0; k < 16; k++)
-                if (sq.s.note[b * 16 + k][0])
-                    has = 1;
-            cv_rect(bx, y + 8, 11, 14, b < set.seq_bars ? (has ? K_RED_M : K_CELL) : K_PANEL);
-            if (b >= set.seq_bars)
-                frame_rect(bx, y + 8, 11, 14, K_CELL);
-            if ((st >= 0 && st / 16 == b) || (ui.rec && !eng_playing() && ui.cursor / 16 == b))
-                frame_rect(bx - 1, y + 7, 13, 16, K_CREAM);
+    case PG_SEQ:
+    case PG_MUTE:
+    case PG_STEP: {                      /* the four tracks: their steps (those with notes), their length, the playheads */
+        int t2, i2;
+        for (t2 = 0; t2 < NTRK; t2++) {
+            int32_t ly = y + t2 * 7 + 1, lx = x + 16;
+            int st = eng_seq_step(t2), len = sq.t[t2].len, sel = t2 == sq.trk, mute = sq.t[t2].mute;
+            cv_rect(x + 4, ly, 8, 5, sel ? K_RED : mute ? K_PANEL : K_GREY);   /* its mark: selected, muted */
+            if (mute)
+                frame_rect(x + 4, ly, 8, 5, K_DIM);
+            for (i2 = 0; i2 < TRK_STEPS; i2++) {
+                const step_t *sp = &sq.s.st[t2][i2];
+                uint16_t c = i2 >= len ? K_PANEL : sp->note[0] == SN_TIE ? K_RED_M : step_low(sp) ? (mute ? K_GREY : K_RED)
+                                                                                        : K_CELL;
+                if (i2 < len && i2 == st)
+                    c = K_CREAM;
+                cv_rect(lx + i2 * 3, ly, 2, 5, c);
+            }
+            if (sel)
+                frame_rect(lx - 2, ly - 1, TRK_STEPS * 3 + 3, 7, K_GREY);
         }
         break;
     }
@@ -1900,21 +2161,28 @@ static void draw_row3(void)
     }
 }
 
-/* ---- the sequencer's strip: the bar playing (or being written), its sixteen steps ---- */
+/* ---- the sequencer's strip: the selected track, the sixteen steps playing (or being written): each step's velocity
+ * its height, its gate its width ---- */
 static void draw_seq(void)
 {
-    int st = eng_seq_step(), bar, i;
+    int st = eng_seq_step(sq.trk), page, i, len = seq_len();
     int writing = ui.rec && !eng_playing();
     char t[16];
     cv_rect(4, 194, 232, 1, K_EDGE);
-    cv_text(8, 196, &FONT_B, writing ? "STEP REC" : ui.rec ? "REC" : "SEQUENCER", ui.rec ? K_RED : K_RED);
-    bar = writing ? ui.cursor / 16 : st >= 0 ? st / 16 : 0;
+    t[0] = 'T';
+    t[1] = (char)('1' + sq.trk);
+    t[2] = 0;
+    cv_text(8, 196, &FONT_B, t, K_RED);
+    cv_text(28, 196, &FONT_B, writing ? "STEP REC" : ui.rec ? "REC" : sq.t[sq.trk].mute ? "MUTED" : "SEQ",
+            sq.t[sq.trk].mute && !ui.rec ? K_GREY : K_RED);
+    page = writing ? ui.cursor / 16 : st >= 0 ? st / 16 : 0;
     t[0] = 0;
-    text_cat(t, "BAR ");
-    int_text(bar + 1, t + 4);
+    int_text(page * 16 + 1, t);
+    text_cat(t, "-");
+    int_text(page * 16 + 16, t + text_len_(t));
     text_cat(t, "/");
-    int_text(set.seq_bars, t + text_len_(t));
-    cv_text(writing ? 80 : 90, 199, &FONT_XS, t, K_CREAM);
+    int_text(len, t + text_len_(t));
+    cv_text(writing ? 96 : 76, 199, &FONT_XS, t, K_CREAM);
     {                                    /* the transport: play, stop, or the arp's badge */
         int32_t px = 146, i2;
         if (eng_playing())
@@ -1927,20 +2195,22 @@ static void draw_seq(void)
     }
     int_text((int32_t)(eng_bpm() + 0.5f), t);
     cv_text(172, 199, &FONT_XS, t, K_CREAM);
-    cv_text(194, 199, &FONT_XS, eng_arp_on() ? "ARP" : RATE_NAME[set.seq_rate], eng_arp_on() ? K_RED : K_GREY);
+    cv_text(194, 199, &FONT_XS, eng_arp_on() ? "ARP" : RATE_NAME[sq.t[sq.trk].rate], eng_arp_on() ? K_RED : K_GREY);
     for (i = 0; i < 16; i++) {
-        int s = bar * 16 + i, n = 0, k, tie;
+        int s = page * 16 + i, n = 0, k, tie;
         int32_t x = 8 + i * 14, y = 213;
-        const uint8_t *nt = sq.s.note[s];
-        tie = nt[0] == SN_TIE;
+        const step_t *sp = &sq.s.st[sq.trk][s];
+        tie = sp->note[0] == SN_TIE;
         for (k = 0; k < SEQ_POLY; k++)
-            if (nt[k] >= 12)
+            if (sp->note[k] >= 12)
                 n++;
-        cv_rect(x, y, 12, 16, s < seq_len() ? K_CELL : K_PANEL);
-        cv_rect(x, y, 12, 3, s < seq_len() ? RGB(66, 66, 70) : K_PANEL);
-        if (n) {                         /* its notes: the more, the fuller */
-            int32_t hgt = 6 + n * 10 / SEQ_POLY;
-            cv_rect(x, y + 16 - hgt, 12, hgt, K_RED);
+        cv_rect(x, y, 12, 16, s < len ? K_CELL : K_PANEL);
+        cv_rect(x, y, 12, 3, s < len ? RGB(66, 66, 70) : K_PANEL);
+        if (n) {                         /* its notes: as loud as tall, as long as wide; a chord: a mark on top */
+            int32_t hgt = 3 + step_vel(sp) * 13 / 127, wid = 2 + step_gate(sp) * 10 / 100;
+            cv_rect(x, y + 16 - hgt, wid, hgt, s < len ? K_RED : K_RED_M);
+            if (n > 1)
+                cv_rect(x + 4, y + 16 - hgt - 3, 4, 2, K_CREAM);
         }
         if (tie)
             cv_rect(x - 2, y + 9, 16, 4, K_RED_M);
@@ -1949,11 +2219,11 @@ static void draw_seq(void)
         if (writing && s == ui.cursor && (frame_n & 8u))
             frame_rect(x - 1, y - 1, 14, 18, K_CREAM);
         if ((i & 3) == 0) {
-            int_text(i + 1, t);
-            cv_text(x + (i < 9 ? 3 : 0), 230, &FONT_XS, t, i == 0 ? K_CREAM : K_GREY);
+            int_text(s + 1, t);
+            cv_text(x + (s < 9 ? 3 : 0), 230, &FONT_XS, t, i == 0 ? K_CREAM : K_GREY);
         }
     }
-    if (st >= 0 && st / 16 == bar)       /* the playhead */
+    if (st >= 0 && st / 16 == page)      /* the playhead */
         cv_rect(8 + (st & 15) * 14 + 6, 211, 1, 20, K_CREAM);
 }
 
@@ -2058,8 +2328,7 @@ void app_init(void)
     plat_cpu2_set(1);                    /* five voices on the second core (one core still works) */
     eng_init();
     settings_load();
-    preset_load(set.cur);
-    eng_seq_bind(&sq.s);
+    song_apply();
     sound_globals();
     for (k = 0; k < NKEYS; k++)
         key_sounding[k] = -1;
@@ -2156,7 +2425,7 @@ void app_backup_hold(int on) { (void)on; }
 void app_backup_restored(void)
 {
     settings_load();
-    preset_load(set.cur);
+    song_apply();
     sound_globals();
     ui.redraw = 1;
 }
@@ -2167,7 +2436,7 @@ int app_expect(const char *what, int *got)
     if (!strcmp(what, "page"))
         *got = ui.page;
     else if (!strcmp(what, "cur"))
-        *got = set.cur;
+        *got = CUR;
     else if (!strcmp(what, "edited"))
         *got = edited;
     else if (!strcmp(what, "voices"))
@@ -2179,7 +2448,21 @@ int app_expect(const char *what, int *got)
     else if (!strcmp(what, "playing"))
         *got = eng_playing();
     else if (!strcmp(what, "step"))
-        *got = eng_seq_step();
+        *got = eng_seq_step(sq.trk);
+    else if (!strcmp(what, "trk"))
+        *got = sq.trk;
+    else if (!strcmp(what, "len"))
+        *got = seq_len();
+    else if (!strncmp(what, "vt", 2)) {  /* vtN: the voices sounding track N's sound */
+        int v, c = 0;
+        for (v = 0; v < NVOICE; v++)
+            if (eng_voice_track(v) == atoi(what + 2))
+                c++;
+        *got = c;
+    } else if (!strncmp(what, "rv", 2))  /* rvN: track N's REVERB MIX (the effects: the song's) */
+        *got = sq.t[atoi(what + 2) & 3].snd.p[P_RV_MIX];
+    else if (!strncmp(what, "mute", 4))
+        *got = sq.t[atoi(what + 4) & 3].mute;
     else if (!strcmp(what, "rec"))
         *got = ui.rec;
     else if (!strcmp(what, "cursor"))
@@ -2204,11 +2487,17 @@ int app_expect(const char *what, int *got)
         *got = seq_dirty;
     else if (!strncmp(what, "s", 1) && what[1] >= '0' && what[1] <= '9') {   /* sN: step N's first note */
         int s = atoi(what + 1);
-        *got = s >= 0 && s < SEQ_STEPS ? sq.s.note[s][0] : -1;
+        *got = s >= 0 && s < TRK_STEPS ? sq.s.st[sq.trk][s].note[0] : -1;
+    } else if (!strncmp(what, "v", 1) && what[1] >= '0' && what[1] <= '9') { /* vN: step N's velocity */
+        int s = atoi(what + 1);
+        *got = s >= 0 && s < TRK_STEPS ? sq.s.st[sq.trk][s].vel : -1;
+    } else if (!strncmp(what, "g", 1) && what[1] >= '0' && what[1] <= '9') { /* gN: step N's gate */
+        int s = atoi(what + 1);
+        *got = s >= 0 && s < TRK_STEPS ? sq.s.st[sq.trk][s].gate : -1;
     } else if (!strncmp(what, "n", 1) && what[1] >= '0' && what[1] <= '9') { /* nN: step N's notes */
         int s = atoi(what + 1), k, c = 0;
-        for (k = 0; k < SEQ_POLY && s >= 0 && s < SEQ_STEPS; k++)
-            if (sq.s.note[s][k] >= 12)
+        for (k = 0; k < SEQ_POLY && s >= 0 && s < TRK_STEPS; k++)
+            if (sq.s.st[sq.trk][s].note[k] >= 12)
                 c++;
         *got = c;
     } else if (what[0] == 'k' && what[1] >= '1' && what[1] <= '4' && !what[2])

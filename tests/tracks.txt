@@ -1,0 +1,88 @@
+# the four tracks: each its own sound and line; step record with velocity, step edit, mute, playback together,
+# the effects shared
+wait 2000
+expect trk 0
+tap SEQ
+expect page 15
+expect k1 1
+expect len 16
+# track 2: its own sound (FAT BASS), a line of 8 steps
+turn K1 1
+expect trk 1
+expect k1 2
+expect cur 3
+turn K2 -8
+expect len 8
+shot track.png
+# step record into it: two notes, then a rest
+tap REC
+expect rec 1
+expect page 24
+tapkey w0
+expect n0 1
+expect cursor 1
+tapkey w2
+expect n1 1
+expect cursor 2
+# step edit: back to step 1, softer, shorter, up a semitone
+turn K1 -2
+expect cursor 0
+turn K2 -1
+expect v0 <127
+expect v0 >0
+turn K3 -1
+expect g0 <60
+turn K4 1
+expect cursor 0
+shot stepedit.png
+tap REC
+expect rec 0
+# track 1: a chord on its first step
+expect page 15
+turn K1 -1
+expect trk 0
+expect cur 0
+tap REC
+key w0 down
+key w2 down
+key w4 down
+wait 100
+key w0 up
+key w2 up
+key w4 up
+wait 50
+expect n0 3
+tap REC
+expect page 15
+# both play, each its own sound
+wav tracks.wav
+press PLAY
+wait 30
+expect playing 1
+expect vt0 >2
+expect vt1 >0
+release PLAY
+wait 1500
+shot tracksplay.png
+# track 2 muted: only track 1 sounds
+tap SEQ
+expect page 23
+turn K2 1
+expect mute1 1
+wait 2500
+expect vt1 0
+turn K2 -1
+expect mute1 0
+tap PLAY
+wavstop
+expect playing 0
+# the effects: turned on track 2, the same in every track
+tap SEQ
+turn K1 1
+expect trk 1
+tap FX
+expect page 10
+turn K2 127
+expect rv1 127
+expect rv0 127
+expect rv2 127

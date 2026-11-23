@@ -133,12 +133,27 @@ how ROOM, HALL, PLATE or SPRING sound.
 
 ## Sequencer and arpeggiator
 
-- **Sequencer**: up to **16 bars** of 16 steps, each step holding a **chord of up to 7 notes**, a rest or a **tie**.
-  RATE 1/8, 1/8T, 1/16, 1/16T, 1/32; GATE; TRANSPOSE ±24; SWING (CLOCK page). PLAY starts it from the top.
-  - **Step record**: stopped, press REC. Play a chord (or one note): when every finger is off it goes into the step and
-    the cursor moves on. **PRESET** moves the cursor, **SEQ** writes a rest, **SAVE** a tie. REC again to finish.
-  - **Live record**: playing, press REC. What you play goes into the nearest step, beside what is there.
-  - **REC held 1 s** clears the sequence. It saves itself when stopped.
+- **Sequencer** (v1.1): **four tracks of 64 steps**, for four lines at once - a bass, chords, a lead, a pattern.
+  - **Each track its own sound**: a preset, edited as you like, kept with the song. The seven voices are shared by the
+    four tracks (a voice plays the sound of the track whose note it plays); the effects (reverb, space, chorus,
+    distortion, delay) are one set for the song: a preset loaded into track 1 brings its effects, into tracks 2-4 the
+    song's stay; turning an FX page changes them for every track.
+  - **Each track its own LENGTH (1-64 steps), RATE (1/8 .. 1/32, triplets), TRANSPOSE (±24) and MUTE**: tracks of
+    different lengths run against each other (polymeter). SWING (CLOCK page) for all. PLAY starts them all from the top.
+  - **A step**: a note or a **chord of up to 7 notes**, a rest or a **tie**, its own **velocity** and **gate** (5-100 %
+    of the step).
+  - **SEQ**: the TRACK page (TRACK 1-4, LENGTH, RATE, TRANSPOSE); again: MUTES (one knob a track). The track selected is
+    the one the keys play, the pages edit, PRESET loads a sound into, SAVE keeps, REC writes, the arp plays. The page
+    shows all four lines (their steps, length, playheads); the strip at the bottom the selected track's 16 steps
+    around the playhead, each step as tall as its velocity and as wide as its gate.
+  - **Step record**: stopped, press REC: the STEP EDIT page. Play a chord (or one note): when every finger is off it
+    goes into the step (at the velocity played) and the cursor moves on. **PRESET** or **K1** move the cursor, **K2**
+    sets the step's VELOCITY, **K3** its GATE, **K4** moves its notes (NOTE), **SEQ** writes a rest, **SAVE** a tie. REC
+    again to finish.
+  - **Live record**: playing, press REC. What you play goes into the selected track's nearest step, beside what is
+    there, at its velocity.
+  - **REC held 1 s** clears the selected track. The song (the four sounds and lines) saves itself when stopped. A v1.0
+    sequence comes over into track 1 (its first 64 steps).
 - **Arpeggiator**: UP, DOWN, UP-DN, RANDOM, PLAYED; 1/8 to 1/32 with triplets; 1 to 4 octaves; GATE. **ARP held 1 s**
   is HOLD (the notes stay; a new chord replaces them).
 - Both run in the audio render, on time to within 2.9 ms, and follow **MIDI clock** (START, STOP, CONTINUE) when it
@@ -161,7 +176,7 @@ how ROOM, HALL, PLATE or SPRING sound.
 | FX | REVERB: TYPE, MIX, DECAY, TONE; again SPACE REVERB: MODULATE, SHIMMER, SWELL, PREDELAY; again CHORUS: CHORUS, RATE, DEPTH, DISTORT; again DELAY: TIME L, TIME R, REPEATS, MIX; again DELAY MOD: DEPTH, RATE, TONE, SYNC |
 | GLO | VOICE: GLIDE, VELOCITY (to the amp), UNISON, BEND (semitones); again AFTERTOUCH: DEST, AMOUNT, CURVE, SMOOTH; again CLOCK: BPM, SWING, KEY VEL (TOUCH or fixed), MIDI CH (and each core's load) |
 | ARP | the arp on and its page: MODE, RATE, OCTAVES, GATE; again: off. Held 1 s: HOLD |
-| SEQ | SEQUENCER: BARS, RATE, GATE, TRANSPOSE |
+| SEQ | TRACK: TRACK (1-4), LENGTH, RATE, TRANSPOSE; again MUTES (track 1-4). In step record: a rest |
 | PLAY | the sequencer from the top / stop |
 | REC | record (step or live, above). Held 1 s: clear |
 | SAVE | keep the edited preset in its slot; held + PRESET: in another slot (on letting go). The SAVE light: edited, not saved |
@@ -218,6 +233,7 @@ stereo field, the sixteen bars). POLY MOD, VOICE SPREAD, VINTAGE and the sequenc
     X0X_FONTSET=terminus python3 fm1-base/tools/build.py . --host
     build/host/prophet67_host tests/basic.txt build/host
     build/host/prophet67_host tests/seq.txt build/host
+    build/host/prophet67_host tests/tracks.txt build/host
 
 GitHub Actions builds the `.fwsc` on every push (Actions → the run → Artifacts → prophet67-firmware), and puts the
 browser emulator on GitHub Pages. A tag `v*` makes a release with the `.fwsc` attached.

@@ -20,17 +20,31 @@ eigene Gefahr.
 | FX | REVERB: TYPE (ROOM, HALL, PLATE, SPRING, SPACE), MIX, DECAY, TONE; nochmal SPACE REVERB: MODULATE, SHIMMER, SWELL, PREDELAY; nochmal CHORUS: CHORUS, RATE, DEPTH, DISTORT; nochmal DELAY: TIME L, TIME R, REPEATS, MIX; nochmal DELAY MOD: DEPTH, RATE, TONE, SYNC (Zeiten als Notenwerte zum Takt) |
 | GLO | VOICE: GLIDE, VELOCITY, UNISON, BEND; nochmal AFTERTOUCH: DEST (FILTER, SWELL, POWER, VIBRATO, LFO 1, PITCH, POLY MOD), AMOUNT (±), CURVE (früh/spät), SMOOTH (wie weich der Druck ankommt); nochmal CLOCK: BPM, SWING, KEY VEL (TOUCH = Anschlag der Tasten, oder fest), MIDI CH (dort auch die Last beider Kerne) |
 | ARP | Arp an + Seite (MODE, RATE, OCTAVES, GATE); nochmal: aus. 1 s halten: HOLD |
-| SEQ | SEQUENCER: BARS (1-16), RATE, GATE, TRANSPOSE |
+| SEQ | TRACK: TRACK (1–4), LENGTH (1–64 Steps), RATE, TRANSPOSE; nochmal MUTES (Spur 1–4 stumm). Im Step-Record: Pause |
 | PLAY | Sequencer von vorn / Stopp |
-| REC | Aufnahme: gestoppt Schritt für Schritt, laufend live. 1 s halten: Sequenz löschen |
+| REC | Aufnahme in die gewählte Spur: gestoppt Schritt für Schritt (Seite STEP EDIT), laufend live. 1 s halten: Spur löschen |
 | SAVE | bearbeitetes Preset in seinem Platz speichern; halten + PRESET: in einen anderen Platz (beim Loslassen). Leuchtet SAVE, ist etwas geändert und noch nicht gespeichert |
 
-## Sequencer
+## Sequencer (v1.1): 4 Spuren × 64 Steps
 
-- **Step-Record**: gestoppt REC drücken. Einen Akkord (oder einen Ton) spielen – sobald alle Finger los sind, steht er
-  im Step und der Cursor geht weiter. PRESET bewegt den Cursor, SEQ = Pause, SAVE = Tie (Haltebogen). REC beendet.
-- **Live-Record**: während er läuft REC drücken; was du spielst, landet im nächstgelegenen Step.
-- Bis zu 16 Takte à 16 Steps, je Step bis zu 7 Töne. Speichert sich selbst, wenn gestoppt.
+- **Vier Spuren**, jede mit **eigenem Sound** (ein Preset, beliebig bearbeitet, mit dem Song gespeichert) und eigener
+  Linie – z. B. Bass, Akkorde, Lead, Pattern. Die 7 Stimmen teilen sich alle Spuren; jede Stimme klingt mit dem Sound
+  der Spur, deren Note sie spielt.
+- **Effekte** (Reverb, Space, Chorus, Distortion, Delay) gibt es einmal für den ganzen Song: ein Preset in Spur 1 bringt
+  seine Effekte mit, in Spur 2–4 bleiben die des Songs; eine FX-Seite ändert sie für alle Spuren.
+- **Pro Spur**: LENGTH 1–64 Steps (verschiedene Längen laufen gegeneinander), RATE (1/8 … 1/32, Triolen), TRANSPOSE
+  ±24, MUTE. SWING (CLOCK) gilt für alle. PLAY startet alle von vorn.
+- **Pro Step**: ein Ton oder ein Akkord (bis 7 Töne), Pause oder Tie, eigene **Velocity** und **Gate** (5–100 %).
+- **SEQ** öffnet die Seite TRACK: K1 wählt die Spur. Die gewählte Spur spielst du auf den Tasten, bearbeitest du mit
+  allen Seiten, in sie lädt PRESET einen Sound, SAVE speichert ihren Sound, REC nimmt in sie auf, der Arp spielt sie.
+  Die Seite zeigt alle vier Linien mit Länge und Laufpunkt; unten die 16 Steps der gewählten Spur – je Step so hoch
+  wie seine Velocity und so breit wie sein Gate. SEQ nochmal: MUTES.
+- **Step-Record**: gestoppt REC drücken (Seite STEP EDIT). Einen Akkord oder Ton spielen – sobald alle Finger los
+  sind, steht er im Step (mit der gespielten Velocity) und der Cursor geht weiter. K1 oder PRESET = Cursor,
+  K2 = VELOCITY, K3 = GATE, K4 = NOTE (verschiebt die Töne des Steps), SEQ = Pause, SAVE = Tie. REC beendet.
+- **Live-Record**: während er läuft REC drücken; was du spielst, landet im nächstgelegenen Step der gewählten Spur.
+- REC 1 s halten löscht die gewählte Spur. Der Song speichert sich selbst, wenn es still ist. Eine Sequenz aus v1.0
+  landet in Spur 1 (ihre ersten 64 Steps).
 
 ## Poly Mod, Vintage, Spread
 
