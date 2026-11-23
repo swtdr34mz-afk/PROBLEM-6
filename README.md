@@ -6,9 +6,14 @@ Built on [fm1-base](https://github.com/charlesvestal/fm1-base) and [felucca-bsp]
 
 Unofficial: not made, endorsed or supported by Sequential or M-VAVE. Install at your own risk.
 
-![The panel](site/img/screen-main.png) ![OSC 1](site/img/screen-osc.png) ![POLY MOD](site/img/screen-polymod.png) ![SPACE](site/img/screen-space.png)
+![The panel](site/img/screen-main.png) ![OSC 1](site/img/screen-osc.png) ![POLY MOD](site/img/screen-polymod.png) ![SPACE](site/img/screen-space.png) ![LOW SPLIT](site/img/screen-split.png) ![DELAY](site/img/screen-delay.png)
 
 **Handbuch (Deutsch):** [docs/HANDBUCH.md](docs/HANDBUCH.md) · **In the browser:** [emulator](https://swtdr34mz-afk.github.io/PROPHET-67/emu/)
+
+## Install
+
+Download `prophet67-1.0.fwsc` (or the newest) from [Releases](https://github.com/swtdr34mz-afk/PROPHET-67/releases)
+and install it as any FM-1 firmware. Your presets and sequence are kept across updates.
 
 ## The voice
 
