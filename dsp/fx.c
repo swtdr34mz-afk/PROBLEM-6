@@ -236,6 +236,7 @@ INL float shimmer(float x)
 }
 
 /* ------------------------------------------------------------- the block --- */
+/* (the effects run from the flash: their loops are small and stay in its cache) */
 /* the reverb asleep: nothing going in and its tail gone below -100 dB for a second; it wakes with the next sound
  * (a held SPACE at DECAY 127 never sleeps) */
 static uint8_t rv_sleep;
@@ -255,7 +256,7 @@ float fx_weight(void)                    /* in voices' worth of work (measured: 
     return w;
 }
 
-HOT void fx_process(float *l, float *r, uint32_t n)
+void fx_process(float *l, float *r, uint32_t n)
 {
     uint32_t s, k;
     float kd = 1.0f - fm_expf(-6.2831853f * fm_minf(F.damp_hz, 9500.0f) / RSR);

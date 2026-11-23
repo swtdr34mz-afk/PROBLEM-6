@@ -289,6 +289,9 @@ static void voice_start(voice_t *v, int id, int note, float vel, int retrig)
     notes_n++;
 }
 
+/* voices_render runs from RAM, and reaches voice_start in the flash through this */
+static void (*volatile voice_start_far)(voice_t *, int, int, float, int) = voice_start;
+
 static int voice_find(int id)
 {
     int i;
@@ -626,7 +629,7 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
             {
                 float p2 = P.o2_semi + (v->c2 + v->n2 + v->dr2) * 0.01f + (lm[LD_FREQ] + lm[LD_FREQ2]) * 12.0f;
                 if (lowf)                /* LOW FREQ: an LFO's rates (1 Hz at middle C), with the keys or without */
-                    inc2 = fm_exp2f((p2 + (P.o2_mode == O2M_LOW ? p - 60.0f : 0.0f)) * (1.0f / 12.0f)) * (1.0f / SR);
+                    inc2 = ex2((p2 + (P.o2_mode == O2M_LOW ? p - 60.0f : 0.0f)) * (1.0f / 12.0f)) * (1.0f / SR);
                 else
                     inc2 = hz_of(p + p2) * (1.0f / SR);
             }
@@ -635,7 +638,7 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
             sh1 = P.o1_shape + v->cshape;
             pw1 = P.o1_pw + v->cpw;
             if (P.pm_dosc & PMO_FREQ)
-                inc1 *= fm_exp2f(P.pm_fenv * fen * 3.0f);   /* up to 3 octaves */
+                inc1 *= ex2(P.pm_fenv * fen * 3.0f);   /* up to 3 octaves */
             if (P.pm_dosc & PMO_SHAPE)
                 sh1 += P.pm_fenv * fen;
             if (P.pm_dosc & PMO_PW)
@@ -659,11 +662,11 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
             {
                 float tk = blk_res[c] * v->cres, tg, tG, tig, tG4, tgh, tkh, ta1, tc, inv = 1.0f / (float)CH;
                 tc = 1.0f + tk * 0.32f;   /* some of the bass the resonance takes, back (not all: a Prophet's) */
-                tg = tan_w(3.1415927f / SR * fm_clampf(fm_exp2f(cut), 12.0f, 17500.0f));
+                tg = tan_w(3.1415927f / SR * fm_clampf(ex2(cut), 12.0f, 17500.0f));
                 tig = 1.0f / (1.0f + tg);
                 tG = tg * tig;
                 tG4 = 1.0f / (1.0f + tk * tG * tG * tG * tG);
-                tgh = tan_w(3.1415927f / SR * fm_clampf(fm_exp2f(hp), 8.0f, 12000.0f));
+                tgh = tan_w(3.1415927f / SR * fm_clampf(ex2(hp), 8.0f, 12000.0f));
                 tkh = blk_hpk[c];
                 ta1 = 1.0f / (1.0f + tgh * (tgh + tkh));
                 if (!v->cinit) {         /* a voice starting from silence: from here */
@@ -749,9 +752,9 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
                         v->fade = 1.0f;
                         v->fe.v = v->ae.v = 0.0f;
                         ae = 0.0f;
-                        if (v->pend) {   /* the note it was taken for */
+                        if (v->pend) {   /* the note it was taken for (in the flash: through a pointer) */
                             v->pend = 0;
-                            voice_start(v, v->pid, v->pnote, v->pvel, 1);
+                            voice_start_far(v, v->pid, v->pnote, v->pvel, 1);
                         } else {
                             v->fe.st = v->ae.st = ES_IDLE;
                         }
@@ -772,7 +775,7 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
                 }
                 if (pm_sp)
                     wave_set(&w1, sh1 + pm_s * o2, pw1 + pm_p * o2);
-                o1 = osc_tick(&v->o1, &w1, pm_f != 0.0f ? fm_minf(inc1 * fm_exp2f(pm_f * o2), 0.45f) : inc1,
+                o1 = osc_tick(&v->o1, &w1, pm_f != 0.0f ? fm_minf(inc1 * ex2(pm_f * o2), 0.45f) : inc1,
                               (sync && wr2) ? wd2 : -1.0f, &wr1, &wd1);
                 if (wr1)
                     v->flip = 1.0f - v->flip;
@@ -785,7 +788,7 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
                 if (hp_on) {             /* (at its bottom, below 24 Hz, it is left out) */
                     float qa1 = a1, qa2 = a2, qg = gh;
                     if (pm_h != 0.0f) {  /* oscillator 2 moving it: worked out this sample */
-                        qg = tan_w(3.1415927f / SR * fm_clampf(fm_exp2f(hp + pm_h * o2), 8.0f, 12000.0f));
+                        qg = tan_w(3.1415927f / SR * fm_clampf(ex2(hp + pm_h * o2), 8.0f, 12000.0f));
                         qa1 = 1.0f / (1.0f + qg * (qg + kh));
                         qa2 = qg * qa1;
                     }
@@ -800,7 +803,7 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
                 {
                     float qG = G, qig = ig, qG4 = G4, G2;
                     if (pm_l != 0.0f) {  /* oscillator 2 moving it: worked out this sample */
-                        float gs = tan_w(3.1415927f / SR * fm_clampf(fm_exp2f(cut + pm_l * o2), 12.0f, 17500.0f));
+                        float gs = tan_w(3.1415927f / SR * fm_clampf(ex2(cut + pm_l * o2), 12.0f, 17500.0f));
                         qig = 1.0f / (1.0f + gs);
                         qG = gs * qig;
                         qG4 = 1.0f / (1.0f + kres * qG * qG * qG * qG);
@@ -865,7 +868,7 @@ static uint8_t act[NVOICE], act_n, act_k;
 static void job_voices(uint32_t arg)
 {
     (void)arg;
-    voices_render(act + act_k, act_n - act_k, vb_l[1], vb_r[1]);
+    PLAT_FAR(voices_render)(act + act_k, act_n - act_k, vb_l[1], vb_r[1]);
 }
 
 /* the load, measured: this core's render and the second core's share, in % of a block's time (peaks over ~1 s) */
@@ -1009,10 +1012,10 @@ void eng_render(int32_t *lr, uint32_t n, float gain)
     on2 = plat_cpu2_on() && act_k < act_n && plat_cpu2_run(job_voices, 0);
     if (!on2)
         act_k = act_n;                   /* one core: all of them here */
-    voices_render(act, act_k, vb_l[0], vb_r[0]);
+    PLAT_FAR(voices_render)(act, act_k, vb_l[0], vb_r[0]);
     t1 = plat_ticks24();
     if (on2 && plat_cpu2_wait() != 0) {
-        voices_render(act + act_k, act_n - act_k, vb_l[1], vb_r[1]);   /* (given up: done here) */
+        PLAT_FAR(voices_render)(act + act_k, act_n - act_k, vb_l[1], vb_r[1]);   /* (given up: done here) */
         on2 = 0;
     }
     if (!on2 && act_k == act_n)

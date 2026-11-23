@@ -17,6 +17,8 @@
 #else
 #define HOT __attribute__((section(".c1_text"), noinline))
 #endif
+/* (code in RAM reaches the flash only through a pointer, and the flash reaches it the same way, PLAT_FAR: so what it
+ * calls is inlined, always) */
 #define INL static inline __attribute__((always_inline))
 
 /* notes from inside the render (the sequencer, the arp): straight to the voices */
@@ -40,18 +42,44 @@ float clock_pos(void);                   /* where the clock is now, in ticks (wi
 float clock_spt(void);                   /* samples a tick now */
 
 /* small helpers */
-static inline float hz_of(float midi) { return 440.0f * fm_exp2f((midi - 69.0f) * (1.0f / 12.0f)); }
-static inline float k_of(float tau_s) { return tau_s <= 0.0f ? 1.0f : 1.0f - fm_expf(-1.0f / (tau_s * SR)); }
-static inline float u7(int v) { return (float)v * (1.0f / 127.0f); }
-static inline float bip(int v) { return v >= 64 ? (float)(v - 64) * (1.0f / 63.0f) : (float)(v - 64) * (1.0f / 64.0f); }
-static inline float flush_dn(float x) { return fm_fabsf(x) < 1e-15f ? 0.0f : x; }
+/* 2^x, as fastmath's fm_exp2f (the same polynomial), forced inline for the RAM code */
+INL float ex2(float x)
+{
+    fm_bits_t b;
+    float p, fl, f;
+    int32_t i;
+    if (x < -126.0f)
+        return 0.0f;
+    if (x > 127.0f)
+        x = 127.0f;
+    i = (int32_t)(x + 0.5f);
+    fl = (float)i;
+    if (fl > x + 0.5f)
+        fl -= 1.0f;
+    f = x - fl;
+    p = 1.534580891e-04f;
+    p = p * f + 1.339993158e-03f;
+    p = p * f + 9.618488972e-03f;
+    p = p * f + 5.550328776e-02f;
+    p = p * f + 2.402264689e-01f;
+    p = p * f + 6.931472057e-01f;
+    p = p * f + 1.0f;
+    b.f = p;
+    b.i += (int32_t)fl << 23;
+    return b.f;
+}
+INL float hz_of(float midi) { return 440.0f * ex2((midi - 69.0f) * (1.0f / 12.0f)); }
+INL float k_of(float tau_s) { return tau_s <= 0.0f ? 1.0f : 1.0f - fm_expf(-1.0f / (tau_s * SR)); }
+INL float u7(int v) { return (float)v * (1.0f / 127.0f); }
+INL float bip(int v) { return v >= 64 ? (float)(v - 64) * (1.0f / 63.0f) : (float)(v - 64) * (1.0f / 64.0f); }
+INL float flush_dn(float x) { return fm_fabsf(x) < 1e-15f ? 0.0f : x; }
 /* tan(w) for w 0 .. ~1.2 (the filters' prewarped coefficient): odd series, 7 % low at the top, exact below 0.6 */
-static inline float tan_w(float w)
+INL float tan_w(float w)
 {
     float w2 = w * w;
     return w * (1.0f + w2 * (0.33333f + w2 * (0.13333f + w2 * 0.05397f)));
 }
-static inline uint32_t rnd_u(uint32_t *s)
+INL uint32_t rnd_u(uint32_t *s)
 {
     uint32_t x = *s;
     x ^= x << 13;
@@ -60,4 +88,4 @@ static inline uint32_t rnd_u(uint32_t *s)
     *s = x;
     return x;
 }
-static inline float rnd_f(uint32_t *s) { return (float)(int32_t)rnd_u(s) * (1.0f / 2147483648.0f); }   /* -1..1 */
+INL float rnd_f(uint32_t *s) { return (float)(int32_t)rnd_u(s) * (1.0f / 2147483648.0f); }   /* -1..1 */
