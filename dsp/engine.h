@@ -41,6 +41,7 @@ enum {
     P_VINTAGE, P_SPREAD,                               /* SELECT, ALGORITHM */
     P_L2_RATE, P_L2_AMT, P_L2_SHAPE, P_L2_DEST,        /* LFO 2 (v0.2: added after, so older presets load) */
     P_L1_SYNC, P_L2_SYNC, P_L1_RETRIG, P_L2_RETRIG,    /* LFO SYNC */
+    P_AT_DEST, P_AT_AMT, P_AT_CURVE, P_AT_SMOOTH,      /* AFTERTOUCH (v0.5) */
     NPARAM
 };
 typedef struct {
@@ -66,6 +67,8 @@ extern const uint16_t LSY_TICKS[NLSY];   /* a cycle, in clock ticks (24 a quarte
 #define PMO_PW 4u
 enum { PMF_OFF, PMF_LPF, PMF_HPF, PMF_BOTH, NPMF };
 enum { RV_ROOM, RV_HALL, RV_PLATE, RV_SPRING, RV_SPACE, NRV };
+/* AFTERTOUCH: what pressing harder does (OFFWORLD's FILTER, SWELL, POWER, VIBRATO, and the Prophet-6's own) */
+enum { AT_OFF, AT_FILTER, AT_SWELL, AT_POWER, AT_VIBRATO, AT_LFO, AT_PITCH, AT_POLYMOD, NAT };
 
 /* the presets */
 #define NAME_LEN 12
@@ -81,6 +84,9 @@ void eng_init(void);
 void eng_patch(const uint8_t *p);       /* the sound (a patch's NPARAM bytes); any time */
 /* notes: id names the note (the same id again strikes it again), note a MIDI note, vel 0..1 */
 void eng_note_on(int id, int note, float vel);
+void eng_note_on_gain(int id, int note, float vel, float gain);   /* with its own level (the split's BALANCE) */
+void eng_press(int id, float p);        /* a note's pressure 0..1 (the keys, MIDI poly pressure) */
+void eng_press_all(float p);            /* every note's (MIDI channel pressure) */
 void eng_note_off(int id);
 void eng_sustain(int on);               /* the pedal */
 void eng_bend(float v);                 /* -1..1 (the patch's BEND range) */
@@ -95,6 +101,7 @@ int eng_ducked(void);
 
 /* the screen and the tests */
 float eng_voice_env(int v);             /* voice v's amp envelope 0..1 (its LED) */
+float eng_voice_press(int v);           /* its pressure now 0..1 (smoothed) */
 int eng_voice_note(int v);              /* the note it plays (-1: none) */
 int eng_voices(void);                   /* voices sounding */
 uint32_t eng_notes(void);               /* notes started since the start */

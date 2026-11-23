@@ -514,6 +514,7 @@ expect peak_db_max -0.1
 expect steals >40
 tap GLO
 tap GLO
+tap GLO
 key w0 down
 wait 1200
 shot load.png

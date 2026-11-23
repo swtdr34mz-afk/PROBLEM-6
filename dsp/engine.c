@@ -36,6 +36,8 @@ static struct {
     float glide_k, avel, bend;
     uint8_t unison;
     float vint, spread;
+    uint8_t at_dest;
+    float at_amt, at_curve, at_k;          /* AFTERTOUCH: amount -1..1, the curve's exponent, the smoothing */
 } P;
 
 /* ------------------------------------------------------------ vintage, spread --- */
@@ -93,6 +95,8 @@ typedef struct {
      * so a cutoff never steps (lG, lig, lG4, lk, lc: the low-pass; ha1, ha2, hg, hk: the high-pass) */
     float lG, lig, lG4, lk, lc, ha1, ha2, hg, hk;
     uint8_t cinit;
+    float gain, pgain;                   /* its level (the split's BALANCE), the waiting note's */
+    float press, ptgt;                   /* AFTERTOUCH: now (smoothed), where it heads (curved) */
     float gl, gr;
     uint8_t hd, far;                     /* the spread's delay on the far side (samples), which side (0 L, 1 R) */
     uint8_t hw;
@@ -103,6 +107,8 @@ static voice_t V[NVOICE];
 #define STEAL 200.0f                     /* a stolen voice's fade, samples (4.5 ms, a smoothstep curve) */
 
 static uint32_t notes_n, steals_n, age_n, rr;
+static float on_gain = 1.0f;            /* the level of the note being started (EV_ON's) */
+static float chan_press;                 /* MIDI channel pressure, curved (every note) */
 static uint8_t sustain;
 static float bend_v, mod_v;
 static int cc_cut = -1;
@@ -126,6 +132,8 @@ static uint32_t lfo_seed = 0x1234567u;
 static uint8_t lfo_reset;                /* a note asked for a RETRIG (render) */
 static float blk_mod[NBLK / CH][NLD];    /* each destination's LFO, amounts in */
 static float blk_trem[NBLK / CH];        /* AMP: the gain, 0..1 */
+static float blk_l1[NBLK / CH], blk_vib[NBLK / CH];   /* LFO 1 at full amount; AFTERTOUCH's vibrato (5.5 Hz) */
+static float vib_ph;
 /* the filter's knobs (and CC 74), as they reach the voices: a knob moves in detents, so each detent's step is spread
  * over 2.5 ms, per chunk; the envelopes, LFOs and poly mod are never smoothed */
 static float blk_cut[NBLK / CH], blk_res[NBLK / CH], blk_env[NBLK / CH], blk_hp[NBLK / CH], blk_hpk[NBLK / CH];
@@ -137,18 +145,18 @@ static struct {
 
 /* ------------------------------------------------------- the events in --- */
 /* notes from the main loop and the 1 kHz tick come through a queue; the render takes them at the start of a block */
-enum { EV_ON, EV_OFF, EV_SUS, EV_ALLOFF, EV_PANIC };
+enum { EV_ON, EV_OFF, EV_SUS, EV_ALLOFF, EV_PANIC, EV_PRESS, EV_PRESS_ALL };
 typedef struct {
     uint8_t type;
     int8_t note;
     int16_t id;
-    float vel;
+    float vel, gain;
 } ev_t;
 #define NEV 64u
 static ev_t evq[NEV];
 static volatile uint32_t ev_w, ev_r;
 
-static void ev_put(int type, int id, int note, float vel)
+static void ev_put2(int type, int id, int note, float vel, float gain)
 {
     uint32_t f = plat_lock();
     if (ev_w - ev_r < NEV) {
@@ -157,10 +165,12 @@ static void ev_put(int type, int id, int note, float vel)
         e->id = (int16_t)id;
         e->note = (int8_t)note;
         e->vel = vel;
+        e->gain = gain;
         ev_w++;
     }
     plat_unlock(f);
 }
+static void ev_put(int type, int id, int note, float vel) { ev_put2(type, id, note, vel, 1.0f); }
 
 /* ------------------------------------------------------------- the patch --- */
 static float env_seconds(int v) { return 0.001f * fm_exp2f((float)v * (14.2877f / 127.0f)); }   /* 1 ms .. 20 s */
@@ -213,6 +223,11 @@ void eng_patch(const uint8_t *p)
     P.avel = u7(p[P_AVEL]);
     P.bend = (float)p[P_BEND];
     P.unison = p[P_UNISON];
+    P.at_dest = p[P_AT_DEST] < NAT ? p[P_AT_DEST] : AT_OFF;
+    P.at_amt = bip(p[P_AT_AMT]);
+    P.at_curve = fm_exp2f(-bip(p[P_AT_CURVE]) * 1.6f);   /* - soft (early), + hard (late): x^0.33 .. x^3 */
+    /* SMOOTH: how fast the pressure reaches the sound, 3 ms .. 0.4 s (per chunk of 16 samples) */
+    P.at_k = 1.0f - fm_expf(-16.0f / ((0.003f + 0.4f * u7(p[P_AT_SMOOTH]) * u7(p[P_AT_SMOOTH])) * SR));
     s = u7(p[P_SPREAD]);
     a = u7(p[P_VINTAGE]);
     P.vint = a;                          /* VINTAGE: straight, so the middle is already clearly there */
@@ -267,7 +282,7 @@ static int any_gate(void)
     return 0;
 }
 
-static void voice_start(voice_t *v, int id, int note, float vel, int retrig)
+static void voice_start(voice_t *v, int id, int note, float vel, int retrig, float gain)
 {
     if (retrig && !any_gate())
         lfo_reset = 1;                   /* (LFO RETRIG: a fresh phrase) */
@@ -277,6 +292,9 @@ static void voice_start(voice_t *v, int id, int note, float vel, int retrig)
     if (P.glide_k >= 1.0f || v->pitch == 0.0f)   /* (with GLIDE each voice slides from its last note) */
         v->pitch = v->target;
     v->vel = vel;
+    v->gain = gain;
+    if (retrig)
+        v->press = v->ptgt = 0.0f;   /* a new key starts unpressed */
     v->n1 = rnd_f(&v->seed) * 5.0f * P.vint;   /* VINTAGE: this keystroke's own few cents and colour */
     v->n2 = rnd_f(&v->seed) * 5.0f * P.vint;
     v->ncut = rnd_f(&v->seed) * 0.12f * P.vint;
@@ -291,7 +309,7 @@ static void voice_start(voice_t *v, int id, int note, float vel, int retrig)
 }
 
 /* voices_render runs from RAM, and reaches voice_start in the flash through this */
-static void (*volatile voice_start_far)(voice_t *, int, int, float, int) = voice_start;
+static void (*volatile voice_start_far)(voice_t *, int, int, float, int, float) = voice_start;
 
 static int voice_find(int id)
 {
@@ -306,8 +324,9 @@ static void unison_play(int retrig)
 {
     int i;
     for (i = 0; i < NVOICE; i++)
-        voice_start(&V[i], u_id[u_n - 1], u_note[u_n - 1], u_vel[u_n - 1], retrig);
+        voice_start(&V[i], u_id[u_n - 1], u_note[u_n - 1], u_vel[u_n - 1], retrig, on_gain);
 }
+
 
 void voice_on(int id, int note, float vel)
 {
@@ -345,7 +364,7 @@ void voice_on(int id, int note, float vel)
     }
     i = voice_find(id);
     if (i >= 0) {                        /* struck again */
-        voice_start(&V[i], id, note, vel, 1);
+        voice_start(&V[i], id, note, vel, 1, on_gain);
         return;
     }
     /* a free voice, taking them in turn (so each note meets another voice's character, and a chord spreads) */
@@ -382,12 +401,13 @@ void voice_on(int id, int note, float vel)
         V[best].pid = (int16_t)id;
         V[best].pnote = (int8_t)note;
         V[best].pvel = vel;
+        V[best].pgain = on_gain;
         V[best].gate = 0;
         V[best].id = -1;
         steals_n++;
         return;
     }
-    voice_start(&V[best], id, note, vel, 1);
+    voice_start(&V[best], id, note, vel, 1, on_gain);
 }
 
 void voice_off(int id)
@@ -600,6 +620,7 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
             continue;
         for (c = 0; c * CH < n; c++) {
             const float *lm = blk_mod[c];
+            float lmv[NLD], pp, pmfe, pmo2, at_cut = 0.0f, at_amp = 1.0f, at_det = 0.0f, at_drv = 1.0f, at_pm = 1.0f;
             float p, inc1, inc2, sh1, pw1, cut, hp, G, gh, kh, a1, a2, kres, comp, pm_s, pm_p, pm_l, pm_h, pm_f;
             float vel_f, famt, hamt, fen, ug, ig, G4, drv, idrv, dG, dig, dG4, dk, dc, dgh, dkh, da1, da2, ft, fk, at, ak;
             int hp_on, pm_sp;
@@ -623,12 +644,39 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
             }
             v->pitch += (v->target - v->pitch) * P.glide_k;
             p = v->pitch + bend_v * P.bend;
+            /* AFTERTOUCH: the key's pressure (or the channel's), smoothed, to where it goes */
+            v->press += (ri_maxf(v->ptgt, chan_press) - v->press) * P.at_k;
+            pp = v->press * P.at_amt;
+            switch (P.at_dest) {
+            case AT_FILTER: at_cut = 4.0f * pp; break;
+            case AT_SWELL: at_amp = ri_maxf(0.0f, 1.0f + 1.5f * pp); at_cut = 0.7f * pp; break;
+            case AT_POWER:               /* (OFFWORLD's: brighter, louder, wider, driven) */
+                at_cut = 1.5f * pp;
+                at_amp = ri_maxf(0.0f, 1.0f + 0.8f * pp);
+                at_det = 12.0f * pp;
+                at_drv = ri_maxf(0.3f, 1.0f + 1.6f * pp);
+                break;
+            case AT_VIBRATO: p += 0.45f * pp * blk_vib[c]; break;
+            case AT_PITCH: p += 2.0f * pp; break;
+            case AT_POLYMOD: at_pm = ri_maxf(0.0f, 1.0f + 2.0f * pp); break;
+            default: break;
+            }
+            pmfe = P.pm_fenv * at_pm;   /* (AFTERTOUCH to POLY MOD: both its amounts) */
+            pmo2 = P.pm_osc2 * at_pm;
+            if (P.at_dest == AT_LFO) {   /* more (or less) of LFO 1, to its destination */
+                int d;
+                for (d = 0; d < NLD; d++)
+                    lmv[d] = lm[d];
+                if (P.lfo_dest[0] < NLD && P.lfo_dest[0] != LD_AMP)
+                    lmv[P.lfo_dest[0]] += pp * blk_l1[c];
+                lm = lmv;
+            }
             if (P.unison)
                 p += U_DET[i] * (0.08f + 0.22f * P.spread);
             inc1 = hz_of(p + P.o1_semi + (v->c1 + v->n1 + v->dr1) * 0.01f + (lm[LD_FREQ] + lm[LD_FREQ1]) * 12.0f)
                    * (1.0f / SR);
             {
-                float p2 = P.o2_semi + (v->c2 + v->n2 + v->dr2) * 0.01f + (lm[LD_FREQ] + lm[LD_FREQ2]) * 12.0f;
+                float p2 = P.o2_semi + (v->c2 + v->n2 + v->dr2 + at_det) * 0.01f + (lm[LD_FREQ] + lm[LD_FREQ2]) * 12.0f;
                 if (lowf)                /* LOW FREQ: an LFO's rates (1 Hz at middle C), with the keys or without */
                     inc2 = ex2((p2 + (P.o2_mode == O2M_LOW ? p - 60.0f : 0.0f)) * (1.0f / 12.0f)) * (1.0f / SR);
                 else
@@ -639,11 +687,11 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
             sh1 = P.o1_shape + v->cshape;
             pw1 = P.o1_pw + v->cpw;
             if (P.pm_dosc & PMO_FREQ)
-                inc1 *= ex2(P.pm_fenv * fen * 3.0f);   /* up to 3 octaves */
+                inc1 *= ex2(pmfe * fen * 3.0f);   /* up to 3 octaves */
             if (P.pm_dosc & PMO_SHAPE)
-                sh1 += P.pm_fenv * fen;
+                sh1 += pmfe * fen;
             if (P.pm_dosc & PMO_PW)
-                pw1 += P.pm_fenv * fen * 0.45f;
+                pw1 += pmfe * fen * 0.45f;
             pw1 += lm[LD_PW] * 0.42f;
             inc1 = fm_minf(inc1, 0.45f);
             inc2 = fm_minf(inc2, 0.45f);
@@ -654,10 +702,10 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
             cut = blk_cut[c] + v->ccut + v->ncut + famt * fen + P.keytrk * (p - 60.0f) * (1.0f / 12.0f);
             hp = blk_hp[c] + hamt * fen + P.keytrk * (p - 60.0f) * (1.0f / 12.0f);
             if (P.pm_dfilt == PMF_LPF || P.pm_dfilt == PMF_BOTH)
-                cut += P.pm_fenv * fen * 7.0f;
+                cut += pmfe * fen * 7.0f;
             if (P.pm_dfilt == PMF_HPF || P.pm_dfilt == PMF_BOTH)
-                hp += P.pm_fenv * fen * 5.0f;
-            cut += lm[LD_LPF] * 4.0f;
+                hp += pmfe * fen * 5.0f;
+            cut += lm[LD_LPF] * 4.0f + at_cut;
             hp += lm[LD_HPF] * 3.0f;
             /* this chunk's coefficients (where they are to be at its end) ... */
             {
@@ -712,16 +760,16 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
                 v->ha2 = tgh * ta1;
             }
             /* poly mod by oscillator 2, per sample */
-            pm_f = blk_fm ? P.pm_osc2 * 2.0f : 0.0f;           /* octaves of FM */
-            pm_s = blk_pms ? P.pm_osc2 : 0.0f;
-            pm_p = blk_pmp ? P.pm_osc2 * 0.45f : 0.0f;
-            pm_l = blk_pml ? P.pm_osc2 * 5.0f : 0.0f;
-            pm_h = blk_pmh ? P.pm_osc2 * 4.0f : 0.0f;
+            pm_f = blk_fm ? pmo2 * 2.0f : 0.0f;           /* octaves of FM */
+            pm_s = blk_pms ? pmo2 : 0.0f;
+            pm_p = blk_pmp ? pmo2 * 0.45f : 0.0f;
+            pm_l = blk_pml ? pmo2 * 5.0f : 0.0f;
+            pm_h = blk_pmh ? pmo2 * 4.0f : 0.0f;
             wave_set(&w2, P.o2_shape + v->cshape2, P.o2_pw + v->cpw2 + lm[LD_PW] * 0.42f);
             wave_set(&w1, sh1, pw1);
-            drv = v->cdrive;
+            drv = v->cdrive * at_drv;
             idrv = 1.0f / drv;
-            ug = v->camp * blk_trem[c]
+            ug = v->camp * blk_trem[c] * at_amp * v->gain
                  * (1.0f - P.avel + P.avel * v->vel);
             hp_on = hp > 4.6f || pm_h != 0.0f;
             pm_sp = pm_s != 0.0f || pm_p != 0.0f;
@@ -755,7 +803,7 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
                         ae = 0.0f;
                         if (v->pend) {   /* the note it was taken for (in the flash: through a pointer) */
                             v->pend = 0;
-                            voice_start_far(v, v->pid, v->pnote, v->pvel, 1);
+                            voice_start_far(v, v->pid, v->pnote, v->pvel, 1, v->pgain);
                         } else {
                             v->fe.st = v->ae.st = ES_IDLE;
                         }
@@ -922,12 +970,18 @@ static void lfo_block(uint32_t n)
             lfo_ph[k] = ph;
             v = lfo_shape_at(k, ph);
             lfo_now[k] = v;
+            if (k == 0)
+                blk_l1[c] = v;
             if (P.lfo_dest[k] == LD_AMP)
                 trem *= 1.0f - amt[k] * (0.5f - 0.5f * v);
             else
                 md[P.lfo_dest[k] < NLD ? P.lfo_dest[k] : 0] += amt[k] * v;
         }
         blk_trem[c] = trem;
+        vib_ph += 5.5f * (float)CH / SR;
+        if (vib_ph >= 1.0f)
+            vib_ph -= 1.0f;
+        blk_vib[c] = 1.0f - 4.0f * fm_fabsf(vib_ph - 0.5f);
         {
             const float k = SMOOTH_K;    /* two stages, each a chunk's share: a detent's step becomes an S-curve
                                           * (no corner to hear at its start), 90 % there in about 6 ms */
@@ -975,7 +1029,19 @@ void eng_render(int32_t *lr, uint32_t n, float gain)
         ev_t e = evq[ev_r % NEV];
         ev_r++;
         switch (e.type) {
-        case EV_ON: voice_on(e.id, e.note, e.vel); break;
+        case EV_ON:
+            on_gain = e.gain;
+            voice_on(e.id, e.note, e.vel);
+            on_gain = 1.0f;
+            break;
+        case EV_PRESS: {
+            int i;
+            for (i = 0; i < NVOICE; i++)
+                if (V[i].id == e.id && (V[i].gate || V[i].sus))
+                    V[i].ptgt = e.vel;
+            break;
+        }
+        case EV_PRESS_ALL: chan_press = e.vel; break;
         case EV_OFF: voice_off(e.id); break;
         case EV_SUS: sus_set(e.note); break;
         case EV_ALLOFF: all_off(); break;
@@ -1092,6 +1158,11 @@ void eng_init(void)
 }
 
 void eng_note_on(int id, int note, float vel) { ev_put(EV_ON, id, note, vel); }
+void eng_note_on_gain(int id, int note, float vel, float gain) { ev_put2(EV_ON, id, note, vel, gain); }
+static float at_curve(float p) { return p <= 0.0f ? 0.0f : fm_powf(fm_minf(p, 1.0f), P.at_curve); }
+void eng_press(int id, float p) { ev_put(EV_PRESS, id, 0, at_curve(p)); }
+void eng_press_all(float p) { ev_put(EV_PRESS_ALL, 0, 0, at_curve(p)); }
+float eng_voice_press(int v) { return v >= 0 && v < NVOICE ? V[v].press : 0.0f; }
 void eng_note_off(int id) { ev_put(EV_OFF, id, 0, 0.0f); }
 void eng_sustain(int on) { ev_put(EV_SUS, 0, on ? 1 : 0, 0.0f); }
 void eng_all_off(void) { ev_put(EV_ALLOFF, 0, 0, 0.0f); }

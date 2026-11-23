@@ -1,0 +1,52 @@
+# the LOW SPLIT (EDIT, twice) and AFTERTOUCH (GLO, twice)
+wait 2000
+tap EDIT
+tap EDIT
+expect page 18
+turn K1 1
+expect split 1
+# the left hand an octave down: F3 plays F2
+key 0 down
+wait 200
+wait 50
+expect ks0 41
+expect root 5
+# the right hand in MAJOR on the left's root (F): C#4 rests on C4
+turn K4 1
+key 8 down
+wait 50
+expect ks8 60
+shot split.png
+key 8 up
+# LOW HOLD: the left note stays when let go; a new left note replaces it
+tap EDIT
+expect page 19
+turn K3 1
+key 0 up
+wait 50
+expect ks0 41
+key 2 down
+wait 150
+wait 50
+expect ks0 -1
+expect ks2 43
+key 2 up
+shot splitkeys.png
+# SEL held + a key: the split there
+press SEL
+tapkey 12
+release SEL
+tap HOME
+# AFTERTOUCH: pressing harder opens the filter, smoothly
+tap GLO
+tap GLO
+expect page 20
+key 14 down 100 110
+wait 400
+expect press >400
+shot aftertouch2.png
+key 14 up
+wait 300
+midi D0 60
+wait 300
+expect press >500

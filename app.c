@@ -33,11 +33,36 @@
 #include "engine.h"
 
 /* ----------------------------------------------------------------- settings --- */
-#define SET_MAGIC 0x33374850u            /* "PH73": the settings record (v0.3: CUTOFF 0..255) */
-#define SET_MAGIC_V2 0x32374850u         /* "PH72": v0.2's (the same, CUTOFF 0..127) */
-#define SET_MAGIC_V1 0x31374850u         /* "PH71": v0.1's, carried over */
-#define NPARAM_V1 54
+#define SET_MAGIC 0x34374850u            /* "PH74": the settings record (v0.5: AFTERTOUCH, the LOW SPLIT) */
+#define SET_MAGIC_V3 0x33374850u         /* "PH73": v0.3/0.4's: 62 parameters a preset */
+#define SET_MAGIC_V2 0x32374850u         /* "PH72": v0.2's: 62, CUTOFF 0..127 */
+#define SET_MAGIC_V1 0x31374850u         /* "PH71": v0.1's: 54, CUTOFF 0..127 */
 #define SEQ_MAGIC 0x51534850u            /* "PHSQ" */
+
+/* the LOW SPLIT's scales (OFFWORLD's) */
+typedef struct {
+    const char *name;
+    uint8_t n;
+    uint8_t st[7];
+} scale_t;
+static const scale_t SCALES[] = {
+    {"MAJOR", 7, {0, 2, 4, 5, 7, 9, 11}},
+    {"MINOR", 7, {0, 2, 3, 5, 7, 8, 10}},
+    {"DORIAN", 7, {0, 2, 3, 5, 7, 9, 10}},
+    {"PHRYGIAN", 7, {0, 1, 3, 5, 7, 8, 10}},
+    {"LYDIAN", 7, {0, 2, 4, 6, 7, 9, 11}},
+    {"MIXOLYD", 7, {0, 2, 4, 5, 7, 9, 10}},
+    {"HARM MIN", 7, {0, 2, 3, 5, 7, 8, 11}},
+    {"PENTA MAJ", 5, {0, 2, 4, 7, 9}},
+    {"PENTA MIN", 5, {0, 3, 5, 7, 10}},
+    {"BLUES", 6, {0, 3, 5, 6, 7, 10}},
+    {"ARABIC", 7, {0, 1, 4, 5, 7, 8, 11}},
+};
+#define NSCALE (sizeof SCALES / sizeof SCALES[0])
+/* where the right hand's scale stands: in KEY; on the ROOT the left hand plays (the lowest note sounding there, as
+ * OFFWORLD's FOLLOW); or on that root with the scale laid on the white keys (OFFWORLD's WHITE: no wrong note) */
+enum { FOLLOW_KEY, FOLLOW_ROOT, FOLLOW_WHITE, NFOLLOW };
+static const char *const FOLLOW_NAME[NFOLLOW] = {"KEY", "ROOT", "WHITE"};
 typedef struct {
     uint32_t magic;
     patch_t pre[NPRESETS];
@@ -49,6 +74,14 @@ typedef struct {
     uint8_t seq_bars, seq_rate, seq_gate;
     int8_t seq_tr;
     uint8_t rsv[3];
+    /* v0.5: the LOW SPLIT */
+    uint8_t split_oct;                   /* 0 off, 1..3 octaves down */
+    uint8_t split_key;                   /* the right part's first key 1..26 */
+    uint8_t scale_l, scale_r;            /* 0 CHROMATIC, else SCALES[n - 1] */
+    uint8_t key;                         /* the scales' key (C .. B), when the right hand does not follow */
+    uint8_t follow;                      /* FOLLOW_* */
+    uint8_t lowhold;                     /* the low split's notes stay */
+    int8_t balance;                      /* -50 (the left only) .. +50 (the right only) */
 } settings_t;
 _Static_assert(sizeof(settings_t) <= PLAT_STORE_MAX, "the settings outgrew a store object");
 typedef struct {
@@ -57,21 +90,6 @@ typedef struct {
 } seqrec_t;
 _Static_assert(sizeof(seqrec_t) <= PLAT_STORE_MAX, "the sequence outgrew a store object");
 
-typedef struct {                         /* v0.1's record: its presets had NPARAM_V1 parameters */
-    uint32_t magic;
-    struct {
-        char name[NAME_LEN];
-        uint8_t p[NPARAM_V1];
-    } pre[NPRESETS];
-    uint8_t cur;
-    int8_t oct;
-    uint16_t bpm;
-    uint8_t swing, kvel, mch;
-    uint8_t arp_mode, arp_rate, arp_oct, arp_gate, arp_hold;
-    uint8_t seq_bars, seq_rate, seq_gate;
-    int8_t seq_tr;
-    uint8_t rsv[3];
-} settings_v1_t;
 static settings_t set;
 static seqrec_t sq;
 static patch_t ed;                       /* the preset as edited (what sounds) */
@@ -111,7 +129,7 @@ static void settings_defaults(void)
         set.pre[i] = FACTORY[i];
     set.bpm = 110;
     set.swing = 0;
-    set.kvel = 100;
+    set.kvel = 0;                        /* TOUCH: the keys' own velocity */
     set.arp_mode = ARP_UP;
     set.arp_rate = RATE_16;
     set.arp_oct = 1;
@@ -119,16 +137,20 @@ static void settings_defaults(void)
     set.seq_bars = 1;
     set.seq_rate = RATE_16;
     set.seq_gate = 60;
+    set.split_key = 7;                   /* F3..B3 left, C4 the right's first (as OFFWORLD) */
+    set.follow = FOLLOW_ROOT;
 }
 
 static int settings_ok(void)
 {
     uint32_t i, k;
     if (set.magic != SET_MAGIC || set.cur >= NPRESETS || set.oct < -3 || set.oct > 3 || set.bpm < 30 || set.bpm > 300
-        || set.swing > 50 || set.kvel < 1 || set.kvel > 127 || set.mch > 16 || set.arp_mode >= NARP
+        || set.swing > 50 || set.kvel > 127 || set.mch > 16 || set.arp_mode >= NARP
         || set.arp_rate >= NRATE || set.arp_oct < 1 || set.arp_oct > 4 || set.arp_gate < 5 || set.arp_gate > 100
         || set.seq_bars < 1 || set.seq_bars > SEQ_BARS || set.seq_rate >= NRATE || set.seq_gate < 5
-        || set.seq_gate > 100 || set.seq_tr < -24 || set.seq_tr > 24)
+        || set.seq_gate > 100 || set.seq_tr < -24 || set.seq_tr > 24 || set.split_oct > 3 || set.split_key < 1
+        || set.split_key >= NKEYS || set.scale_l > NSCALE || set.scale_r > NSCALE || set.key > 11
+        || set.follow >= NFOLLOW || set.lowhold > 1 || set.balance < -50 || set.balance > 50)
         return 0;
     for (i = 0; i < NPRESETS; i++)
         for (k = 0; k < NPARAM; k++)
@@ -137,35 +159,50 @@ static int settings_ok(void)
     return 1;
 }
 
-static int settings_v1(void)             /* v0.1's settings: the presets kept, the new parameters at their start */
+/* an older record, from its bytes: magic, 16 presets of NAME_LEN + np bytes, then the globals (cur, oct, bpm (16 bits),
+ * swing .. seq_tr) as they still are; what came later at its start */
+static int settings_old(const uint8_t *raw, int n)
 {
-    static settings_v1_t o;
-    uint32_t i, k;
-    if (plat_store_load(OBJ_SETTINGS, &o, sizeof o) != (int)sizeof o || o.magic != SET_MAGIC_V1)
+    uint32_t magic = (uint32_t)raw[0] | (uint32_t)raw[1] << 8 | (uint32_t)raw[2] << 16 | (uint32_t)raw[3] << 24;
+    uint32_t np, off, i, k;
+    const uint8_t *g;
+    if (magic == SET_MAGIC_V1)
+        np = 54;
+    else if (magic == SET_MAGIC_V2 || magic == SET_MAGIC_V3)
+        np = 62;
+    else
+        return 0;
+    off = 4u + NPRESETS * (NAME_LEN + np);
+    if ((uint32_t)n < off + 19u)
         return 0;
     settings_defaults();
     for (i = 0; i < NPRESETS; i++) {
+        const uint8_t *pr = raw + 4u + i * (NAME_LEN + np);
         for (k = 0; k < NAME_LEN; k++)
-            set.pre[i].name[k] = o.pre[i].name[k];
+            set.pre[i].name[k] = (char)pr[k];
         for (k = 0; k < NPARAM; k++)
-            set.pre[i].p[k] = k < NPARAM_V1 ? o.pre[i].p[k] : 0;
-        set.pre[i].p[P_CUTOFF] = (uint8_t)(o.pre[i].p[P_CUTOFF] >= 127 ? 255 : o.pre[i].p[P_CUTOFF] * 2);
+            set.pre[i].p[k] = k < np ? pr[NAME_LEN + k] : FACTORY[NPRESETS - 1].p[k];   /* (INIT's: AFTERTOUCH on) */
+        if (magic != SET_MAGIC_V3)       /* CUTOFF to its finer steps */
+            set.pre[i].p[P_CUTOFF] = (uint8_t)(pr[NAME_LEN + P_CUTOFF] >= 127 ? 255 : pr[NAME_LEN + P_CUTOFF] * 2);
     }
-    set.cur = o.cur;
-    set.oct = o.oct;
-    set.bpm = o.bpm;
-    set.swing = o.swing;
-    set.kvel = o.kvel;
-    set.mch = o.mch;
-    set.arp_mode = o.arp_mode;
-    set.arp_rate = o.arp_rate;
-    set.arp_oct = o.arp_oct;
-    set.arp_gate = o.arp_gate;
-    set.arp_hold = o.arp_hold;
-    set.seq_bars = o.seq_bars;
-    set.seq_rate = o.seq_rate;
-    set.seq_gate = o.seq_gate;
-    set.seq_tr = o.seq_tr;
+    g = raw + off;
+    set.cur = g[0];
+    set.oct = (int8_t)g[1];
+    set.bpm = (uint16_t)(g[2] | g[3] << 8);
+    set.swing = g[4];
+    set.kvel = g[5];
+    set.mch = g[6];
+    set.arp_mode = g[7];
+    set.arp_rate = g[8];
+    set.arp_oct = g[9];
+    set.arp_gate = g[10];
+    set.arp_hold = g[11];
+    set.seq_bars = g[12];
+    set.seq_rate = g[13];
+    set.seq_gate = g[14];
+    set.seq_tr = (int8_t)g[15];
+    set.kvel = 0;                        /* (v0.5: the keys' own velocity) */
+    set.magic = SET_MAGIC;
     if (!settings_ok()) {
         settings_defaults();
         return 0;
@@ -176,15 +213,15 @@ static int settings_v1(void)             /* v0.1's settings: the presets kept, t
 
 static void settings_load(void)
 {
-    int n = plat_store_load(OBJ_SETTINGS, &set, sizeof set);
-    if (n == (int)sizeof set && set.magic == SET_MAGIC_V2) {   /* v0.2's: CUTOFF to its finer steps */
-        uint32_t i;
-        for (i = 0; i < NPRESETS; i++)
-            set.pre[i].p[P_CUTOFF] = (uint8_t)(set.pre[i].p[P_CUTOFF] >= 127 ? 255 : set.pre[i].p[P_CUTOFF] * 2);
-        set.magic = SET_MAGIC;
-        set_dirty = 1;
+    static uint8_t raw[PLAT_STORE_MAX];
+    int n = plat_store_load(OBJ_SETTINGS, raw, sizeof raw);
+    if (n == (int)sizeof set) {
+        uint8_t *d = (uint8_t *)&set;
+        int i;
+        for (i = 0; i < n; i++)
+            d[i] = raw[i];
     }
-    if ((n != (int)sizeof set || !settings_ok()) && !settings_v1())
+    if ((n != (int)sizeof set || !settings_ok()) && !(n > 4 && settings_old(raw, n)))
         settings_defaults();
     if (plat_store_load(OBJ_SEQ, &sq, sizeof sq) != (int)sizeof sq || sq.magic != SEQ_MAGIC) {
         memset(&sq, 0, sizeof sq);
@@ -224,12 +261,15 @@ static void preset_load(int i)
     eng_patch(ed.p);
 }
 
+static void latched_release(uint32_t keys_down);
+static void latch_down(void);
+
 /* -------------------------------------------------------------------- pages --- */
 /* a knob: a parameter of the preset (0 .. NPARAM-1), or one of these (the settings, kept across presets) */
 enum { G_BPM = 0x100, G_SWING, G_KVEL, G_MCH, G_ARP_MODE, G_ARP_RATE, G_ARP_OCT, G_ARP_GATE, G_SEQ_BARS, G_SEQ_RATE,
-       G_SEQ_GATE, G_SEQ_TR };
+       G_SEQ_GATE, G_SEQ_TR, G_SPLIT, G_POINT, G_SCALE_L, G_SCALE_R, G_KEY, G_FOLLOW, G_LOWHOLD, G_BALANCE };
 enum { PG_FILTER, PG_FILTER2, PG_OSC1, PG_OSC2, PG_MIXER, PG_FENV, PG_AENV, PG_LFO, PG_POLY, PG_FXA, PG_FXB, PG_SPACE,
-       PG_VOICE, PG_CLOCK, PG_ARP, PG_SEQ, PG_LFO2, PG_LSYNC, NPAGES };
+       PG_VOICE, PG_CLOCK, PG_ARP, PG_SEQ, PG_LFO2, PG_LSYNC, PG_SPLIT, PG_SPLIT2, PG_AT, NPAGES };
 typedef struct {
     const char *title;
     uint8_t button;
@@ -247,11 +287,14 @@ static const page_t PAGES[NPAGES] = {
     [PG_LFO] = {"LFO 1", B_LFO, PG_LFO2, {P_LFO_RATE, P_LFO_AMT, P_LFO_SHAPE, P_LFO_DEST}},
     [PG_LFO2] = {"LFO 2", B_LFO, PG_LSYNC, {P_L2_RATE, P_L2_AMT, P_L2_SHAPE, P_L2_DEST}},
     [PG_LSYNC] = {"LFO SYNC", B_LFO, PG_LFO, {P_L1_SYNC, P_L2_SYNC, P_L1_RETRIG, P_L2_RETRIG}},
-    [PG_POLY] = {"POLY MOD", B_EDIT, PG_POLY, {P_PM_FENV, P_PM_OSC2, P_PM_DOSC, P_PM_DFILT}},
+    [PG_POLY] = {"POLY MOD", B_EDIT, PG_SPLIT, {P_PM_FENV, P_PM_OSC2, P_PM_DOSC, P_PM_DFILT}},
+    [PG_SPLIT] = {"LOW SPLIT", B_EDIT, PG_SPLIT2, {G_SPLIT, G_POINT, G_SCALE_L, G_SCALE_R}},
+    [PG_SPLIT2] = {"SPLIT KEYS", B_EDIT, PG_POLY, {G_KEY, G_FOLLOW, G_LOWHOLD, G_BALANCE}},
     [PG_FXB] = {"REVERB", B_FX, PG_SPACE, {P_RV_TYPE, P_RV_MIX, P_RV_DECAY, P_RV_TONE}},
     [PG_SPACE] = {"SPACE REVERB", B_FX, PG_FXA, {P_SP_MOD, P_SP_SHIM, P_SP_SWELL, P_SP_PRE}},
     [PG_FXA] = {"CHORUS", B_FX, PG_FXB, {P_CH_MIX, P_CH_RATE, P_CH_DEPTH, P_DIST}},
-    [PG_VOICE] = {"VOICE", B_GLO, PG_CLOCK, {P_GLIDE, P_AVEL, P_UNISON, P_BEND}},
+    [PG_VOICE] = {"VOICE", B_GLO, PG_AT, {P_GLIDE, P_AVEL, P_UNISON, P_BEND}},
+    [PG_AT] = {"AFTERTOUCH", B_GLO, PG_CLOCK, {P_AT_DEST, P_AT_AMT, P_AT_CURVE, P_AT_SMOOTH}},
     [PG_CLOCK] = {"CLOCK", B_GLO, PG_VOICE, {G_BPM, G_SWING, G_KVEL, G_MCH}},
     [PG_ARP] = {"ARPEGGIATOR", B_ARP, PG_ARP, {G_ARP_MODE, G_ARP_RATE, G_ARP_OCT, G_ARP_GATE}},
     [PG_SEQ] = {"SEQUENCER", B_SEQ, PG_SEQ, {G_SEQ_BARS, G_SEQ_RATE, G_SEQ_GATE, G_SEQ_TR}},
@@ -279,6 +322,7 @@ static struct {
     int8_t intro;
     uint32_t intro_at;
     float lfo_trace[64], lfo2_trace[64];
+    uint8_t sel_used, prs_all;
     float tail_trace[64];
     uint8_t trace_w;
 } ui;
@@ -353,6 +397,13 @@ static int g_max(int code)
     case G_ARP_GATE: case G_SEQ_GATE: return 100;
     case G_SEQ_BARS: return SEQ_BARS;
     case G_SEQ_TR: return 24;
+    case G_SPLIT: return 3;
+    case G_POINT: return NKEYS - 1;
+    case G_SCALE_L: case G_SCALE_R: return NSCALE;
+    case G_KEY: return 11;
+    case G_FOLLOW: return NFOLLOW - 1;
+    case G_LOWHOLD: return 1;
+    case G_BALANCE: return 50;
     }
     return 127;
 }
@@ -360,7 +411,8 @@ static int g_min(int code)
 {
     switch (code) {
     case G_BPM: return 30;
-    case G_KVEL: case G_ARP_OCT: case G_SEQ_BARS: return 1;
+    case G_ARP_OCT: case G_SEQ_BARS: case G_POINT: return 1;
+    case G_BALANCE: return -50;
     case G_ARP_GATE: case G_SEQ_GATE: return 5;
     case G_SEQ_TR: return -24;
     }
@@ -383,6 +435,14 @@ static int knob_get(int code)
     case G_SEQ_RATE: return set.seq_rate;
     case G_SEQ_GATE: return set.seq_gate;
     case G_SEQ_TR: return set.seq_tr;
+    case G_SPLIT: return set.split_oct;
+    case G_POINT: return set.split_key;
+    case G_SCALE_L: return set.scale_l;
+    case G_SCALE_R: return set.scale_r;
+    case G_KEY: return set.key;
+    case G_FOLLOW: return set.follow;
+    case G_LOWHOLD: return set.lowhold;
+    case G_BALANCE: return set.balance;
     }
     return 0;
 }
@@ -407,6 +467,20 @@ static void knob_put(int code, int v)
     case G_SEQ_RATE: set.seq_rate = (uint8_t)v; break;
     case G_SEQ_GATE: set.seq_gate = (uint8_t)v; break;
     case G_SEQ_TR: set.seq_tr = (int8_t)v; break;
+    case G_SPLIT: set.split_oct = (uint8_t)v; break;
+    case G_POINT: set.split_key = (uint8_t)v; break;
+    case G_SCALE_L: set.scale_l = (uint8_t)v; break;
+    case G_SCALE_R: set.scale_r = (uint8_t)v; break;
+    case G_KEY: set.key = (uint8_t)v; break;
+    case G_FOLLOW: set.follow = (uint8_t)v; break;
+    case G_LOWHOLD:
+        set.lowhold = (uint8_t)v;
+        if (!v)
+            latched_release(ui.keys);    /* off: what only it held goes */
+        else
+            latch_down();                /* on: the left keys down now stay */
+        break;
+    case G_BALANCE: set.balance = (int8_t)v; break;
     }
     sound_globals();
     dirty();
@@ -414,7 +488,8 @@ static void knob_put(int code, int v)
 static const char *knob_name(int code)
 {
     static const char *const G[] = {"BPM", "SWING", "KEY VEL", "MIDI CH", "MODE", "RATE", "OCTAVES", "GATE", "BARS",
-                                    "RATE", "GATE", "TRANSPOSE"};
+                                    "RATE", "GATE", "TRANSPOSE", "SPLIT", "POINT", "SCALE L", "SCALE R", "KEY",
+                                    "FOLLOW", "LOW HOLD", "BALANCE"};
     return code < NPARAM ? PARAMS[code].name : G[code - G_BPM];
 }
 static int rate_sync(int code)            /* an LFO's RATE while it is synced: its SYNC parameter (else -1) */
@@ -451,11 +526,31 @@ static void knob_text(int code, char *b)
         break;
     case G_ARP_MODE: text_cat(b, ARP_NAME[v]); break;
     case G_ARP_RATE: case G_SEQ_RATE: text_cat(b, RATE_NAME[v]); break;
-    case G_SEQ_TR:
+    case G_SEQ_TR: case G_BALANCE:
         if (v > 0)
             text_cat(b, "+");
         int_text(v, b + (v > 0));
         break;
+    case G_KVEL:
+        if (v == 0)
+            text_cat(b, "TOUCH");
+        else
+            int_text(v, b);
+        break;
+    case G_SPLIT:
+        if (v == 0)
+            text_cat(b, "OFF");
+        else {
+            text_cat(b, "-");
+            int_text(v, b + 1);
+            text_cat(b, " OCT");
+        }
+        break;
+    case G_POINT: note_text(KEY_BASE + v + 12 * set.oct, b); break;
+    case G_SCALE_L: case G_SCALE_R: text_cat(b, v ? SCALES[v - 1].name : "CHROMA"); break;
+    case G_KEY: text_cat(b, NOTE_NAME[v]); break;
+    case G_FOLLOW: text_cat(b, FOLLOW_NAME[v]); break;
+    case G_LOWHOLD: text_cat(b, v ? "ON" : "OFF"); break;
     default: int_text(v, b);
     }
 }
@@ -465,7 +560,8 @@ static int knob_choice(int code)         /* one detent, one value (no accelerati
 {
     if (code < NPARAM)
         return PARAMS[code].kind == PK_CHOICE || PARAMS[code].max <= 48;
-    return code != G_BPM && code != G_KVEL && code != G_SWING && code != G_ARP_GATE && code != G_SEQ_GATE;
+    return code != G_BPM && code != G_KVEL && code != G_SWING && code != G_ARP_GATE && code != G_SEQ_GATE
+           && code != G_BALANCE;
 }
 static int knob_centred(int code)        /* a bipolar knob: it rests at its centre */
 {
@@ -614,14 +710,91 @@ static volatile uint8_t mrec_note[32], mrec_on[32];
 static volatile uint32_t mrec_w, mrec_r;
 
 /* ------------------------------------------------------------- the keys --- */
-static int key_note(uint32_t k) { return KEY_BASE + (int)k + 12 * set.oct; }
+/* The LOW SPLIT (OFFWORLD's): the keys left of POINT play SPLIT octaves down, in SCALE L (on KEY); the keys from POINT
+ * on play in SCALE R, on KEY, or (FOLLOW ROOT) on the root the left hand plays: the lowest note sounding there, or the
+ * last one; WHITE lays that scale on the white keys from POINT up (the black keys rest). LOW HOLD: the left hand's
+ * notes stay until a new note is played there. BALANCE: the two hands' levels. Without the split, SCALE R covers the
+ * whole keyboard, on KEY. */
+static int split_on(void) { return set.split_oct != 0u; }
+static int is_left(uint32_t k) { return split_on() && k < set.split_key; }
+static int is_white(uint32_t k)
+{
+    uint32_t i;
+    for (i = 0; i < 16u; i++)
+        if (WK[i] == k)
+            return 1;
+    return 0;
+}
+static int snap(int n, int root, int scale)  /* to the scale's note at or below n */
+{
+    const scale_t *sc = &SCALES[(scale - 1) % (int)NSCALE];
+    int rel = ((n - root) % 12 + 12) % 12, best = 0, i;
+    for (i = 0; i < sc->n; i++)
+        if (sc->st[i] <= rel)
+            best = sc->st[i];
+    return n - rel + best;
+}
 
-static void note_down(int note, float vel, int from_keys)
+static int8_t key_sounding[NKEYS];        /* the note each key started (-1 none) */
+static uint32_t latched;                  /* LOW HOLD: the left keys whose notes stay */
+static int root = -1;                     /* the left hand's root (a note class 0..11), -1 none yet */
+
+static int key_map(uint32_t k)            /* the note key k plays now (-1: it rests) */
+{
+    int nat = KEY_BASE + (int)k + 12 * set.oct, base;
+    if (is_left(k)) {
+        int n = nat - 12 * set.split_oct;
+        return set.scale_l ? snap(n, set.key, set.scale_l) : n;
+    }
+    if (!set.scale_r)
+        return nat;
+    base = split_on() && set.follow != FOLLOW_KEY && root >= 0 ? root : set.key;
+    if (split_on() && set.follow == FOLLOW_WHITE) {
+        const scale_t *sc = &SCALES[(set.scale_r - 1) % (int)NSCALE];
+        uint32_t j, first = set.split_key, d = 0;
+        int p0, b0;
+        if (!is_white(k))
+            return -1;
+        while (first < NKEYS && !is_white(first))
+            first++;
+        for (j = first; j < k; j++)
+            d += (uint32_t)is_white(j);
+        p0 = KEY_BASE + (int)first + 12 * set.oct;
+        b0 = p0 - (((p0 - base) % 12 + 12) % 12);
+        if (p0 - b0 > 6)
+            b0 += 12;
+        return b0 + 12 * (int)(d / sc->n) + sc->st[d % sc->n];
+    }
+    return snap(nat, base, set.scale_r);
+}
+
+static void root_update(void)             /* the lowest note sounding in the left hand */
+{
+    uint32_t k;
+    for (k = 0; k < NKEYS; k++)
+        if (is_left(k) && key_sounding[k] >= 0) {
+            if (root != key_sounding[k] % 12) {
+                root = key_sounding[k] % 12;
+                ui.redraw = 1;
+            }
+            return;
+        }
+}
+
+static float zone_gain(uint32_t k)        /* BALANCE */
+{
+    float b = (float)set.balance * (1.0f / 50.0f);
+    if (!split_on())
+        return 1.0f;
+    return is_left(k) ? (b > 0.0f ? 1.0f - b : 1.0f) : (b < 0.0f ? 1.0f + b : 1.0f);
+}
+
+static void note_down(int note, float vel, float gain, int from_keys)
 {
     if (eng_arp_on())
         eng_arp_key(note, 1, vel);
     else
-        eng_note_on(SRC_KEY_ID(note), note, vel);
+        eng_note_on_gain(SRC_KEY_ID(note), note, vel, gain);
     if (from_keys)
         plat_midi_out(0x09u | (0x90u << 8) | ((uint32_t)note << 16) | ((uint32_t)(vel * 127.0f) << 24));
 }
@@ -636,27 +809,121 @@ static void note_up(int note, int from_keys)
         plat_midi_out(0x08u | (0x80u << 8) | ((uint32_t)note << 16));
 }
 
-static int8_t key_sounding[NKEYS];        /* the note each key started (an octave change while held lets go of it) */
+static void key_stop(uint32_t k)
+{
+    if (key_sounding[k] >= 0) {
+        note_up(key_sounding[k], 1);
+        rec_up();
+    }
+    key_sounding[k] = -1;
+    latched &= ~(1u << k);
+}
+
+static void latched_release(uint32_t keys_down)   /* LOW HOLD's notes not held go */
+{
+    uint32_t k;
+    for (k = 0; k < NKEYS; k++)
+        if ((latched >> k & 1u) && !(keys_down >> k & 1u))
+            key_stop(k);
+    latched = 0;
+}
+
+static uint8_t prs_sent[NKEYS];
+static uint8_t sel_now;
+
+static void latch_down(void)
+{
+    uint32_t k;
+    for (k = 0; k < NKEYS; k++)
+        if ((ui.keys >> k & 1u) && is_left(k) && key_sounding[k] >= 0)
+            latched |= 1u << k;
+}
 
 static void keys_input(uint32_t keys)
 {
-    uint32_t k;
+    uint32_t k, left_down = 0;
+    for (k = 0; k < NKEYS; k++)
+        if ((ui.keys >> k & 1u) && is_left(k))
+            left_down |= 1u << k;
     for (k = 0; k < NKEYS; k++) {
         uint32_t bit = 1u << k;
         if ((keys & bit) && !(ui.keys & bit)) {
-            int n = key_note(k);
+            int n, v;
+            if (sel_now) {               /* SEL held + a key: the split there (OFFWORLD's) */
+                char t[8];
+                if (k >= 1u) {
+                    if (!set.split_oct)
+                        set.split_oct = 1;
+                    set.split_key = (uint8_t)k;
+                    note_text(KEY_BASE + (int)k + 12 * set.oct, t);
+                    app_say("SPLIT AT", t);
+                    dirty();
+                }
+                ui.sel_used = 1;
+                continue;
+            }
+            if (is_left(k) && set.lowhold && !left_down && latched) {
+                latched_release(keys);   /* a new note on the left: the held ones go */
+                if (key_sounding[k] >= 0)
+                    key_stop(k);
+            }
+            if (key_sounding[k] >= 0)
+                key_stop(k);
+            n = key_map(k);
             if (n < 0 || n > 127)
                 continue;
+            v = set.kvel ? set.kvel : touch_vel(k);
+            if (v <= 0)
+                v = 100;
             key_sounding[k] = (int8_t)n;
-            note_down(n, (float)set.kvel * (1.0f / 127.0f), 1);
+            prs_sent[k] = 0;
+            note_down(n, (float)v * (1.0f / 127.0f), zone_gain(k), 1);
             rec_down(n);
-        } else if (!(keys & bit) && (ui.keys & bit)) {
-            if (key_sounding[k] >= 0) {
-                note_up(key_sounding[k], 1);
-                rec_up();
+            if (is_left(k)) {
+                left_down |= bit;
+                if (set.lowhold)
+                    latched |= bit;
+                root_update();
             }
-            key_sounding[k] = -1;
+        } else if (!(keys & bit) && (ui.keys & bit)) {
+            if (is_left(k))
+                left_down &= ~bit;
+            if ((latched >> k & 1u) && set.lowhold) {
+                if (key_sounding[k] >= 0 && prs_sent[k]) {   /* it stays, no longer pressed */
+                    eng_press(SRC_KEY_ID(key_sounding[k]), 0.0f);
+                    prs_sent[k] = 0;
+                }
+                continue;
+            }
+            key_stop(k);
+            root_update();
         }
+    }
+}
+
+/* AFTERTOUCH: the held keys' pressure to their notes (with the arp on: the hardest pressed, to all) */
+static void pressure_input(uint32_t keys)
+{
+    uint32_t k;
+    uint8_t mx = 0;
+    if (ed.p[P_AT_DEST] == AT_OFF)
+        return;
+    for (k = 0; k < NKEYS; k++) {
+        uint8_t pr = (keys >> k & 1u) && key_sounding[k] >= 0 ? touch_pressure(k) : 0u;
+        int d = (int)pr - (int)prs_sent[k];
+        if (pr > mx)
+            mx = pr;
+        if (eng_arp_on())
+            continue;
+        if (d >= 2 || d <= -2 || (pr == 0u && prs_sent[k])) {
+            prs_sent[k] = pr;
+            if (key_sounding[k] >= 0)
+                eng_press(SRC_KEY_ID(key_sounding[k]), (float)pr * (1.0f / 127.0f));
+        }
+    }
+    if (eng_arp_on() && (mx > ui.prs_all + 1u || mx + 1u < ui.prs_all || (mx == 0u && ui.prs_all))) {
+        ui.prs_all = mx;
+        eng_press_all((float)mx * (1.0f / 127.0f));
     }
 }
 
@@ -851,9 +1118,13 @@ static void macro_turn(int which, int32_t e)   /* SELECT: VINTAGE, ALGORITHM: VO
 
 static void input(void)
 {
-    uint32_t keys = plat_keys(), btn = plat_buttons(), i;
+    uint32_t keys, btn = plat_buttons(), i;
     int32_t e;
+    touch_poll();                        /* the keys with their velocity and pressure */
+    keys = touch_keys();
+    sel_now = (uint8_t)(btn >> B_SEL & 1u);   /* (SEL held + a key: the split point) */
     keys_input(keys);
+    pressure_input(keys);
     for (i = 0; i < NB; i++)
         if ((btn >> i & 1u) && !(ui.btn >> i & 1u))
             button(i);
@@ -889,10 +1160,12 @@ static void lights(void)
 {
     uint32_t lit = 0, dim = 0, btn = 0, dimb, i;
     int v;
-    for (v = 0; v < NVOICE; v++) {       /* the keys of the notes sounding */
-        int n = eng_voice_note(v), k = n - KEY_BASE - 12 * set.oct;
-        if (n >= 0 && k >= 0 && k < NKEYS && eng_voice_env(v) > 0.05f)
-            lit |= 1u << k;
+    (void)v;
+    for (i = 0; i < NKEYS; i++) {        /* the keys sounding lit (LOW HOLD's too); the low split glowing */
+        if (key_sounding[i] >= 0)
+            lit |= 1u << i;
+        else if (is_left(i))
+            dim |= 1u << i;
     }
     if (ui.rec && !eng_playing())        /* step record: the white keys show where the step is in its bar */
         dim |= 1u << WK[ui.cursor & 15];
@@ -953,7 +1226,7 @@ void app_tick(void)
             continue;
         midi_seen = 1;
         if (type == 0x90u && d2) {
-            note_down((int)d1, (float)d2 * (1.0f / 127.0f), 0);
+            note_down((int)d1, (float)d2 * (1.0f / 127.0f), 1.0f, 0);
             if (mrec_w - mrec_r < 32u) {
                 mrec_note[mrec_w % 32u] = (uint8_t)d1;
                 mrec_on[mrec_w % 32u] = 1;
@@ -966,6 +1239,10 @@ void app_tick(void)
                 mrec_on[mrec_w % 32u] = 0;
                 mrec_w++;
             }
+        } else if (type == 0xD0u) {        /* channel pressure: every note */
+            eng_press_all((float)d1 * (1.0f / 127.0f));
+        } else if (type == 0xA0u) {        /* poly pressure: the note's */
+            eng_press((int)d1, (float)d2 * (1.0f / 127.0f));
         } else if (type == 0xE0u) {
             eng_bend((float)((int)(d1 | d2 << 7) - 8192) * (1.0f / 8192.0f));
         } else if (type == 0xB0u) {
@@ -1397,6 +1674,55 @@ static void page_visual(int32_t x, int32_t y, int32_t w, int32_t h)
         }
         break;
     }
+    case PG_SPLIT:
+    case PG_SPLIT2: {                    /* the keyboard: the low split, the point, the keys the scales play */
+        int32_t kx = x + 6, kw = (w - 12) / 16, j, wi = 0;
+        for (j = 0; j < NKEYS; j++) {    /* the white keys first */
+            if (!is_white((uint32_t)j))
+                continue;
+            {
+                int n = key_map((uint32_t)j), nat = KEY_BASE + j + 12 * set.oct;
+                uint16_t c = key_sounding[j] >= 0 ? K_RED : is_left((uint32_t)j) ? RGB(120, 40, 34)
+                             : n < 0 ? K_DIM : n != nat ? K_GREY : K_CREAM;   /* (grey: it moves into the scale) */
+                cv_rect(kx + wi * kw, y + 2, kw - 1, h - 6, c);
+            }
+            wi++;
+        }
+        wi = 0;
+        for (j = 0; j < NKEYS; j++) {    /* the black keys over them */
+            if (is_white((uint32_t)j)) {
+                wi++;
+                continue;
+            }
+            {
+                int n = key_map((uint32_t)j);
+                uint16_t c = key_sounding[j] >= 0 ? K_RED : is_left((uint32_t)j) ? RGB(70, 20, 18)
+                             : n < 0 ? K_PANEL : RGB(40, 40, 44);
+                cv_rect(kx + wi * kw - kw / 3, y + 2, kw * 2 / 3, (h - 6) * 3 / 5, c);
+            }
+        }
+        if (split_on()) {                /* the point */
+            int32_t px = kx, cnt = 0;
+            for (j = 0; j < (int)set.split_key; j++)
+                cnt += is_white((uint32_t)j);
+            px += cnt * kw - 1;
+            cv_rect(px, y, 2, h - 2, K_RED);
+        }
+        if (split_on() && set.follow != FOLLOW_KEY && set.scale_r) {   /* the root the right hand follows */
+            char t[8] = "ROOT ";
+            text_cat(t, root >= 0 ? NOTE_NAME[root] : NOTE_NAME[set.key]);
+            cv_text(x + w - 60, y - 14, &FONT_XS, t, K_RED);
+        }
+        break;
+    }
+    case PG_AT: {                        /* each voice's pressure, as it reaches the sound */
+        for (i = 0; i < NVOICE; i++) {
+            int32_t bx = x + 14 + i * 30, hh = (int32_t)(eng_voice_press(i) * (float)(h - 6));
+            cv_rect(bx, y + 2, 20, h - 6, K_CELL);
+            cv_rect(bx, y + h - 4 - hh, 20, hh, K_RED);
+        }
+        break;
+    }
     default: {                           /* FILTER 2: the two filters' response */
         int32_t k, py = 0;
         float lc = u7f(ed.p[P_CUTOFF]), hc = u7f(ed.p[P_HPF]) * 0.93f, rs = u7f(ed.p[P_RESO]);
@@ -1696,6 +2022,7 @@ void app_panic(void)
 
 void app_ui_init(void)
 {
+    touch_on(1);
     ui.redraw = 1;
     ui.intro = 0;
     ui.intro_at = plat_ms();
@@ -1810,7 +2137,19 @@ int app_expect(const char *what, int *got)
         *got = c;
     } else if (what[0] == 'k' && what[1] >= '1' && what[1] <= '4' && !what[2])
         *got = knob_get(PAGES[ui.page].k[what[1] - '1']);
-    else if (!strcmp(what, "level"))     /* the output, x1000 */
+    else if (!strncmp(what, "ks", 2))    /* ksN: the note key N plays (-1 none) */
+        *got = key_sounding[atoi(what + 2) % NKEYS];
+    else if (!strcmp(what, "root"))
+        *got = root;
+    else if (!strcmp(what, "split"))
+        *got = set.split_oct;
+    else if (!strcmp(what, "press")) {   /* the most pressed voice, x1000 */
+        int v;
+        float m = 0.0f;
+        for (v = 0; v < NVOICE; v++)
+            m = fm_maxf(m, eng_voice_press(v));
+        *got = (int)(m * 1000.0f);
+    } else if (!strcmp(what, "level"))     /* the output, x1000 */
         *got = (int)(eng_level() * 1000.0f);
     else if (!strcmp(what, "tail"))
         *got = (int)(eng_tail() * 1000.0f);

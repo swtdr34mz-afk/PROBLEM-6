@@ -95,6 +95,9 @@ tap GLO
 expect page 12
 shot voice.png
 tap GLO
+expect page 20
+shot aftertouch.png
+tap GLO
 expect page 13
 shot clock.png
 tap HOME

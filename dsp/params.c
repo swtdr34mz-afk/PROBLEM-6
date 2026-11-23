@@ -11,6 +11,7 @@ static const char *const C_PMO[8] = {"OFF", "FREQ", "SHAPE", "FRQ+SHP", "PW", "F
 static const char *const C_PMF[NPMF] = {"OFF", "LPF", "HPF", "LPF+HPF"};
 static const char *const C_RV[NRV] = {"ROOM", "HALL", "PLATE", "SPRING", "SPACE"};
 static const char *const C_UNI[2] = {"OFF", "ON"};
+static const char *const C_AT[NAT] = {"OFF", "FILTER", "SWELL", "POWER", "VIBRATO", "LFO 1", "PITCH", "POLY MOD"};
 static const char *const C_LSY[NLSY] = {"OFF", "4 BARS", "2 BARS", "1 BAR", "1/2", "1/4", "1/4T", "1/8", "1/8T",
                                         "1/16", "1/16T", "1/32"};
 const uint16_t LSY_TICKS[NLSY] = {0, 384, 192, 96, 48, 24, 16, 12, 8, 6, 4, 3};
@@ -78,6 +79,10 @@ const param_t PARAMS[NPARAM] = {
     [P_L2_SYNC] = {"SYNC 2", PK_CHOICE, NLSY - 1, C_LSY},
     [P_L1_RETRIG] = {"RETRIG 1", PK_CHOICE, 1, C_UNI},
     [P_L2_RETRIG] = {"RETRIG 2", PK_CHOICE, 1, C_UNI},
+    [P_AT_DEST] = {"DEST", PK_CHOICE, NAT - 1, C_AT},
+    [P_AT_AMT] = {"AMOUNT", PK_BIPOLAR, 127, 0},
+    [P_AT_CURVE] = {"CURVE", PK_BIPOLAR, 127, 0},
+    [P_AT_SMOOTH] = {"SMOOTH", PK_KNOB, 127, 0},
 };
 
 static char *put_int(char *o, int v)

@@ -15,6 +15,7 @@ void app_tick(void);
 #define APP_OVERLOAD                     /* app_overload: the render ran late: the quietest voice let go */
 void app_overload(void);
 #define APP_BLOCK 128u                   /* frames per audio block: 2.9 ms at 44.1 kHz (a keyboard: low latency) */
+#define APP_TOUCH                        /* velocity and pressure from the keys (lib/touch.h): AFTERTOUCH */
 #define APP_CANVAS_PX (240u * 120u)      /* the screen drawn in two bands of 120 rows (the reverbs need the pool) */
 
 /* the store: the settings (presets, the globals), the panel calibration (the platform's), the sequence */

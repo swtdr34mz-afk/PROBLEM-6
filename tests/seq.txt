@@ -88,5 +88,6 @@ expect ext 1
 expect bpm >122
 tap GLO
 tap GLO
+tap GLO
 expect page 13
 shot clockext.png

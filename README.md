@@ -76,6 +76,26 @@ the beat and starts with the sequencer; RATE then steps through 4 BARS, 2 BARS, 
 1/16, 1/16T, 1/32. **RETRIG** starts it from the top on a fresh note. SWEEP PAD has LFO 1 on the filter over 2 bars,
 PM GROWL a stepped LFO 2 at 1/16.
 
+## LOW SPLIT (EDIT, twice)
+
+OFFWORLD's low split. **LOW SPLIT** page: **SPLIT** (OFF, or the left hand 1-3 octaves down), **POINT** (the right
+hand's first key; or hold SEL and press a key), **SCALE L** and **SCALE R** (CHROMA, MAJOR, MINOR, DORIAN, PHRYGIAN,
+LYDIAN, MIXOLYD, HARM MIN, PENTA MAJ, PENTA MIN, BLUES, ARABIC: each hand's keys move to their scale's note at or below
+them). **SPLIT KEYS** page (EDIT a third time): **KEY** (the scales' key), **FOLLOW** (KEY: the right hand's scale on
+KEY; ROOT: on the root the left hand plays, its lowest note sounding, as OFFWORLD's FOLLOW; WHITE: that scale laid on
+the white keys, the black keys resting), **LOW HOLD** (the left hand's notes stay until a new one is played there),
+**BALANCE** (the two hands' levels). Without the split, SCALE R covers the whole keyboard. The keyboard is drawn on
+the page: the low split, the point, the keys that move into the scale (grey), the root.
+
+## AFTERTOUCH (GLO, twice)
+
+Pressing a held key harder (the FM-1's keys sense it, F3 to C5, each key its own: polyphonic) or MIDI channel or poly
+pressure: **DEST** (FILTER opens it; SWELL louder and a little brighter; POWER brighter, louder, wider and driven, as
+OFFWORLD's; VIBRATO; LFO 1 more of LFO 1; PITCH up to 2 semitones; POLY MOD deeper), **AMOUNT** (bipolar: negative
+closes, quietens, bends down), **CURVE** (soft: it answers early; hard: only a firm press), **SMOOTH** (3 ms .. 0.4 s
+for the pressure to reach the sound). Per preset; every factory preset has its own. The page shows each voice's
+pressure. The keys also play with their own velocity now (KEY VEL on CLOCK: TOUCH, or a fixed value).
+
 ## The effects
 
 In the Prophet-6's order:
@@ -123,16 +143,16 @@ how ROOM, HALL, PLATE or SPRING sound.
 | SEL | OSC 1: FREQ, SHAPE, PW, SUB OCT; again OSC 2: FREQ, FINE, SHAPE, PW; again MIXER: OSC 1, OSC 2, NOISE, OSC 2 mode |
 | ENV | FILTER ENV (A D S R); again AMP ENV |
 | LFO | LFO 1: RATE (0.05-30 Hz), AMOUNT, SHAPE (TRI, SAW, RAMP, SQUARE, S+H), DEST (FREQ 1+2, FREQ 1, FREQ 2, PW 1+2, LPF, HPF, AMP); again LFO 2 (the same); again LFO SYNC: SYNC 1, SYNC 2 (OFF, or 4 BARS .. 1/32 with triplets: locked to the clock, BPM or MIDI clock; then RATE picks the division), RETRIG 1, RETRIG 2 (a note played with no other key down starts it from the top) |
-| EDIT | POLY MOD: FILT ENV, OSC 2, OSC 1 TO, FILTER |
+| EDIT | POLY MOD: FILT ENV, OSC 2, OSC 1 TO, FILTER; again LOW SPLIT: SPLIT, POINT, SCALE L, SCALE R; again SPLIT KEYS: KEY, FOLLOW, LOW HOLD, BALANCE |
 | FX | REVERB: TYPE, MIX, DECAY, TONE; again SPACE REVERB: MODULATE, SHIMMER, SWELL, PREDELAY; again CHORUS: CHORUS, RATE, DEPTH, DISTORT |
-| GLO | VOICE: GLIDE, VELOCITY (to the amp), UNISON, BEND (semitones); again CLOCK: BPM, SWING, KEY VEL, MIDI CH (and the CPU load) |
+| GLO | VOICE: GLIDE, VELOCITY (to the amp), UNISON, BEND (semitones); again AFTERTOUCH: DEST, AMOUNT, CURVE, SMOOTH; again CLOCK: BPM, SWING, KEY VEL (TOUCH or fixed), MIDI CH (and each core's load) |
 | ARP | the arp on and its page: MODE, RATE, OCTAVES, GATE; again: off. Held 1 s: HOLD |
 | SEQ | SEQUENCER: BARS, RATE, GATE, TRANSPOSE |
 | PLAY | the sequencer from the top / stop |
 | REC | record (step or live, above). Held 1 s: clear |
 | SAVE | keep the edited preset in its slot; held + PRESET: in another slot (on letting go). The SAVE light: edited, not saved |
 
-MIDI in (USB and TRS): notes with velocity, pitch bend, CC 1 (mod wheel: more LFO), CC 64 (sustain), CC 74 (cutoff),
+MIDI in (USB and TRS): notes with velocity, channel and poly pressure, pitch bend, CC 1 (mod wheel: more LFO), CC 64 (sustain), CC 74 (cutoff),
 clock, START, STOP, CONTINUE. MIDI out (USB): the keys' notes. The settings (presets, globals) and the sequence can be
 backed up and restored over USB.
 
@@ -170,8 +190,8 @@ stereo field, the sixteen bars). POLY MOD, VOICE SPREAD, VINTAGE and the sequenc
   saturation is gentle. 2x oversampling would double the voice cost; left out to keep seven voices on the FM-1.
 - **The SPACE reverb** is an original algorithm in the spirit of the Mercury7, not a copy. Its lines are bounded by a
   soft limiter, so a held SPACE fed again and again stays stable; with SHIMMER on, DECAY stops at 30 s.
-- **Not modelled**: the Prophet-6's aftertouch routing, the BBD and digital
-  delays and phasers of FX A, polychain. The keys of the FM-1 send a fixed velocity (KEY VEL); MIDI notes bring theirs.
+- **Not modelled**: the BBD and digital
+  delays and phasers of FX A, polychain. The top seven keys (C#5-G5) have velocity but no pressure.
 
 ## Building
 
