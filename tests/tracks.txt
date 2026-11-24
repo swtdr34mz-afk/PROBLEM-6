@@ -86,3 +86,43 @@ turn K2 127
 expect rv1 127
 expect rv0 127
 expect rv2 127
+# live record keeps the lengths played: track 3, a note held three steps (TIEs), a short one (a short gate)
+tap SEQ
+expect page 15
+turn K1 1
+expect trk 2
+tap PLAY
+expect playing 1
+tap REC
+expect rec 1
+wait 300
+key w0 down
+wait 420
+key w0 up
+wait 300
+tapkey w4
+wait 400
+tap REC
+tap PLAY
+expect playing 0
+expect ties >0
+expect gmin <50
+shot liverec.png
+# the metronome: GLO to its page, on; SEQ held 1 s toggles it
+tap GLO
+tap GLO
+tap GLO
+tap GLO
+expect page 25
+turn K1 1
+expect click 1
+tap PLAY
+wav click.wav
+wait 1200
+shot metronome.png
+tap PLAY
+wavstop
+press SEQ
+wait 1100
+release SEQ
+expect click 0

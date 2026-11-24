@@ -18,9 +18,9 @@ eigene Gefahr.
 | LFO | LFO 1: RATE, AMOUNT, SHAPE, DEST; nochmal LFO 2; nochmal LFO SYNC: SYNC 1, SYNC 2 (OFF oder 4 BARS … 1/32 zum Takt – dann wählt RATE den Notenwert), RETRIG 1, RETRIG 2 (neuer Ton ohne gehaltene Taste startet das LFO von vorn) |
 | EDIT | POLY MOD; nochmal LOW SPLIT: SPLIT (aus, links 1–3 Oktaven tiefer), POINT (Splitpunkt; oder SEL halten + Taste), SCALE L, SCALE R (Tonleiter je Hand); nochmal SPLIT KEYS: KEY (Tonart), FOLLOW (KEY / ROOT: rechte Hand folgt dem Grundton der linken / WHITE: Tonleiter auf den weißen Tasten), LOW HOLD (linke Töne bleiben stehen), BALANCE (Lautstärke links/rechts) |
 | FX | REVERB: TYPE (ROOM, HALL, PLATE, SPRING, SPACE), MIX, DECAY, TONE; nochmal SPACE REVERB: MODULATE, SHIMMER, SWELL, PREDELAY; nochmal CHORUS: CHORUS, RATE, DEPTH, DISTORT; nochmal DELAY: TIME L, TIME R, REPEATS, MIX; nochmal DELAY MOD: DEPTH, RATE, TONE, SYNC (Zeiten als Notenwerte zum Takt) |
-| GLO | VOICE: GLIDE, VELOCITY, UNISON, BEND; nochmal AFTERTOUCH: DEST (FILTER, SWELL, POWER, VIBRATO, LFO 1, PITCH, POLY MOD), AMOUNT (±), CURVE (früh/spät), SMOOTH (wie weich der Druck ankommt); nochmal CLOCK: BPM, SWING, KEY VEL (TOUCH = Anschlag der Tasten, oder fest), MIDI CH (dort auch die Last beider Kerne) |
+| GLO | VOICE: GLIDE, VELOCITY, UNISON, BEND; nochmal AFTERTOUCH: DEST (FILTER, SWELL, POWER, VIBRATO, LFO 1, PITCH, POLY MOD), AMOUNT (±), CURVE (früh/spät), SMOOTH (wie weich der Druck ankommt); nochmal CLOCK: BPM, SWING, KEY VEL (TOUCH = Anschlag der Tasten, oder fest), MIDI CH (dort auch die Last beider Kerne); nochmal METRONOME: CLICK, VOLUME, BPM, SWING |
 | ARP | Arp an + Seite (MODE, RATE, OCTAVES, GATE); nochmal: aus. 1 s halten: HOLD |
-| SEQ | TRACK: TRACK (1–4), LENGTH (1–64 Steps), RATE, TRANSPOSE; nochmal MUTES (Spur 1–4 stumm). Im Step-Record: Pause |
+| SEQ | TRACK: TRACK (1–4), LENGTH (1–64 Steps), RATE, TRANSPOSE; nochmal MUTES (Spur 1–4 stumm). Im Step-Record: Pause. 1 s halten: Metronom an/aus |
 | PLAY | Sequencer von vorn / Stopp |
 | REC | Aufnahme in die gewählte Spur: gestoppt Schritt für Schritt (Seite STEP EDIT), laufend live. 1 s halten: Spur löschen |
 | SAVE | bearbeitetes Preset in seinem Platz speichern; halten + PRESET: in einen anderen Platz (beim Loslassen). Leuchtet SAVE, ist etwas geändert und noch nicht gespeichert |
@@ -42,7 +42,11 @@ eigene Gefahr.
 - **Step-Record**: gestoppt REC drücken (Seite STEP EDIT). Einen Akkord oder Ton spielen – sobald alle Finger los
   sind, steht er im Step (mit der gespielten Velocity) und der Cursor geht weiter. K1 oder PRESET = Cursor,
   K2 = VELOCITY, K3 = GATE, K4 = NOTE (verschiebt die Töne des Steps), SEQ = Pause, SAVE = Tie. REC beendet.
-- **Live-Record**: während er läuft REC drücken; was du spielst, landet im nächstgelegenen Step der gewählten Spur.
+- **Live-Record**: während er läuft REC drücken; was du spielst, landet im nächstgelegenen Step der gewählten Spur – mit
+  der gespielten Velocity und **so lang, wie du die Taste hältst**: innerhalb eines Steps als Gate, länger als Ties über
+  die folgenden (freien) Steps, der letzte mit dem Gate, an dem du losgelassen hast.
+- **Metronom**: GLO bis zur Seite METRONOME (CLICK: OFF / ON während der Sequencer läuft / REC nur bei Aufnahme,
+  VOLUME, BPM, SWING); die Eins des Takts höher. **SEQ 1 s halten** schaltet es an und aus.
 - REC 1 s halten löscht die gewählte Spur. Der Song speichert sich selbst, wenn es still ist. Eine Sequenz aus v1.0
   landet in Spur 1 (ihre ersten 64 Steps).
 

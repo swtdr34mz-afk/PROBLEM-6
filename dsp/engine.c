@@ -1121,6 +1121,23 @@ static void lfo_block(int t, uint32_t n)
     }
 }
 
+/* the metronome: a short sine blip after the effects (dry, centred), 1.5 kHz on the bar, 1 kHz on the beats */
+static uint8_t click_on;
+static float click_lvl = 0.5f, click_ph, click_inc, click_env;
+void click_beat(int accent)
+{
+    if (!click_on)
+        return;
+    click_inc = (accent ? 1500.0f : 1000.0f) / SR;
+    click_env = accent ? 1.0f : 0.7f;
+    click_ph = 0.0f;
+}
+void eng_click(int on, float level)
+{
+    click_on = (uint8_t)(on != 0);
+    click_lvl = fm_clampf(level, 0.0f, 1.0f);
+}
+
 void eng_render(int32_t *lr, uint32_t n, float gain)
 {
     uint32_t s, t0, t1, t2;
@@ -1204,6 +1221,18 @@ void eng_render(int32_t *lr, uint32_t n, float gain)
         vb_r[0][s] += vb_r[1][s];
     }
     fx_process(vb_l[0], vb_r[0], n);
+    if (click_env > 0.0005f) {
+        float k = fm_expf(-1.0f / (0.012f * SR)), a = 0.8f * click_lvl;
+        for (s = 0; s < n; s++) {
+            float c = fm_sin_turns(click_ph) * click_env * a;
+            click_ph += click_inc;
+            if (click_ph >= 1.0f)
+                click_ph -= 1.0f;
+            click_env *= k;
+            vb_l[0][s] += c;
+            vb_r[0][s] += c;
+        }
+    }
     for (s = 0; s < n; s++) {
         float l = vb_l[0][s], r = vb_r[0][s], a;
         /* the output: soft above -3 dB, never over */

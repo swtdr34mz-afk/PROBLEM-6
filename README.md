@@ -151,7 +151,10 @@ how ROOM, HALL, PLATE or SPRING sound.
     sets the step's VELOCITY, **K3** its GATE, **K4** moves its notes (NOTE), **SEQ** writes a rest, **SAVE** a tie. REC
     again to finish.
   - **Live record**: playing, press REC. What you play goes into the selected track's nearest step, beside what is
-    there, at its velocity.
+    there, at its velocity and **as long as you hold it**: within a step as its gate, longer as TIEs over the steps it
+    holds on (as far as they are free), the last one's gate where you let go.
+  - **Metronome** (v1.1): GLO, 4th page METRONOME: CLICK (OFF, ON while the sequencer plays, REC: only while
+    recording), VOLUME, BPM, SWING; the bar's first beat higher. **SEQ held 1 s** turns it on / off.
   - **REC held 1 s** clears the selected track. The song (the four sounds and lines) saves itself when stopped. A v1.0
     sequence comes over into track 1 (its first 64 steps).
 - **Arpeggiator**: UP, DOWN, UP-DN, RANDOM, PLAYED; 1/8 to 1/32 with triplets; 1 to 4 octaves; GATE. **ARP held 1 s**
@@ -176,7 +179,7 @@ how ROOM, HALL, PLATE or SPRING sound.
 | FX | REVERB: TYPE, MIX, DECAY, TONE; again SPACE REVERB: MODULATE, SHIMMER, SWELL, PREDELAY; again CHORUS: CHORUS, RATE, DEPTH, DISTORT; again DELAY: TIME L, TIME R, REPEATS, MIX; again DELAY MOD: DEPTH, RATE, TONE, SYNC |
 | GLO | VOICE: GLIDE, VELOCITY (to the amp), UNISON, BEND (semitones); again AFTERTOUCH: DEST, AMOUNT, CURVE, SMOOTH; again CLOCK: BPM, SWING, KEY VEL (TOUCH or fixed), MIDI CH (and each core's load) |
 | ARP | the arp on and its page: MODE, RATE, OCTAVES, GATE; again: off. Held 1 s: HOLD |
-| SEQ | TRACK: TRACK (1-4), LENGTH, RATE, TRANSPOSE; again MUTES (track 1-4). In step record: a rest |
+| SEQ | TRACK: TRACK (1-4), LENGTH, RATE, TRANSPOSE; again MUTES (track 1-4). In step record: a rest. Held 1 s: the metronome on / off |
 | PLAY | the sequencer from the top / stop |
 | REC | record (step or live, above). Held 1 s: clear |
 | SAVE | keep the edited preset in its slot; held + PRESET: in another slot (on letting go). The SAVE light: edited, not saved |

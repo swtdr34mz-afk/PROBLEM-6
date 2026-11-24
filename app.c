@@ -24,7 +24,7 @@
  *   ARP             the arp on, and its page (MODE, RATE, OCTAVES, GATE); again: off. Held 1 s: HOLD
  *   SEQ             TRACK page (TRACK 1-4: the one the keys play, the pages edit, REC writes; LENGTH 1-64, RATE,
  *                   TRANSPOSE); again MUTES (each track)
- *   PLAY            the four tracks from the top / stop
+ *   PLAY            the four tracks from the top / stop (SEQ held 1 s: the metronome on / off; GLO's 4th page: METRONOME)
  *   REC             record into the selected track: stopped, step by step on the STEP EDIT page (a chord at a time,
  *                   at its velocity; K1 / PRESET move the step, K2 its VELOCITY, K3 its GATE, K4 its NOTE; SEQ a rest,
  *                   SAVE a tie); playing, live into the nearest steps. Held 1 s: the track cleared
@@ -79,7 +79,7 @@ typedef struct {
     uint8_t arp_mode, arp_rate, arp_oct, arp_gate, arp_hold;
     uint8_t seq_bars, seq_rate, seq_gate;
     int8_t seq_tr;
-    uint8_t rsv[3];
+    uint8_t click, click_vol, rsv[1];    /* v1.1: the metronome (0 off, 1 on, 2 while recording), its volume (0: 60) */
     /* v0.5: the LOW SPLIT */
     uint8_t split_oct;                   /* 0 off, 1..3 octaves down */
     uint8_t split_key;                   /* the right part's first key 1..26 */
@@ -137,6 +137,7 @@ static uint32_t text_len_(const char *s)  /* (no libc strlen on the device) */
     return n;
 }
 
+static void click_update(void);
 static void sound_globals(void)
 {
     eng_tempo((float)set.bpm, (float)set.swing * 0.01f);
@@ -149,6 +150,7 @@ static void sound_globals(void)
     }
     eng_view(sq.trk);
     eng_arp_track(sq.trk);
+    click_update();
 }
 
 static void settings_defaults(void)
@@ -420,10 +422,10 @@ static int step_low(const step_t *sp)
 /* a knob: a parameter of the preset (0 .. NPARAM-1), or one of these (the settings, kept across presets) */
 enum { G_BPM = 0x100, G_SWING, G_KVEL, G_MCH, G_ARP_MODE, G_ARP_RATE, G_ARP_OCT, G_ARP_GATE, G_TRK, G_TLEN, G_TRATE,
        G_TTR, G_SPLIT, G_POINT, G_SCALE_L, G_SCALE_R, G_KEY, G_FOLLOW, G_LOWHOLD, G_BALANCE, G_MUTE1, G_MUTE2, G_MUTE3,
-       G_MUTE4, G_STEP, G_SVEL, G_SGATE, G_SNOTE };
+       G_MUTE4, G_STEP, G_SVEL, G_SGATE, G_SNOTE, G_CLICK, G_CLVOL };
 enum { PG_FILTER, PG_FILTER2, PG_OSC1, PG_OSC2, PG_MIXER, PG_FENV, PG_AENV, PG_LFO, PG_POLY, PG_FXA, PG_FXB, PG_SPACE,
        PG_VOICE, PG_CLOCK, PG_ARP, PG_SEQ, PG_LFO2, PG_LSYNC, PG_SPLIT, PG_SPLIT2, PG_AT, PG_DELAY, PG_DMOD, PG_MUTE,
-       PG_STEP, NPAGES };
+       PG_STEP, PG_CLICK, NPAGES };
 typedef struct {
     const char *title;
     uint8_t button;
@@ -451,7 +453,8 @@ static const page_t PAGES[NPAGES] = {
     [PG_DMOD] = {"DELAY MOD", B_FX, PG_FXB, {P_DL_DEPTH, P_DL_RATE, P_DL_TONE, P_DL_SYNC}},
     [PG_VOICE] = {"VOICE", B_GLO, PG_AT, {P_GLIDE, P_AVEL, P_UNISON, P_BEND}},
     [PG_AT] = {"AFTERTOUCH", B_GLO, PG_CLOCK, {P_AT_DEST, P_AT_AMT, P_AT_CURVE, P_AT_SMOOTH}},
-    [PG_CLOCK] = {"CLOCK", B_GLO, PG_VOICE, {G_BPM, G_SWING, G_KVEL, G_MCH}},
+    [PG_CLOCK] = {"CLOCK", B_GLO, PG_CLICK, {G_BPM, G_SWING, G_KVEL, G_MCH}},
+    [PG_CLICK] = {"METRONOME", B_GLO, PG_VOICE, {G_CLICK, G_CLVOL, G_BPM, G_SWING}},
     [PG_ARP] = {"ARPEGGIATOR", B_ARP, PG_ARP, {G_ARP_MODE, G_ARP_RATE, G_ARP_OCT, G_ARP_GATE}},
     [PG_SEQ] = {"TRACK", B_SEQ, PG_MUTE, {G_TRK, G_TLEN, G_TRATE, G_TTR}},
     [PG_MUTE] = {"MUTES", B_SEQ, PG_SEQ, {G_MUTE1, G_MUTE2, G_MUTE3, G_MUTE4}},
@@ -470,7 +473,7 @@ static struct {
     uint8_t chord[SEQ_POLY], chord_n, chord_vel;
     uint8_t last_vel, last_gate;         /* step edit: what the last step was given (new steps take it) */
     uint8_t rec_held;                    /* step record: fingers down (keys and MIDI) */
-    uint32_t home_t, rec_t, arp_t;       /* when HOME, REC, ARP went down (0: not, or used) */
+    uint32_t home_t, rec_t, arp_t, seq_t;   /* when HOME, REC, ARP, SEQ went down (0: not, or used) */
     uint8_t save_down;
     int8_t copy_to;
     uint32_t enc_at[NE];
@@ -559,6 +562,8 @@ static int g_max(int code)
     case G_TTR: return 24;
     case G_MUTE1: case G_MUTE2: case G_MUTE3: case G_MUTE4: return 1;
     case G_STEP: return sq.t[sq.trk].len;
+    case G_CLICK: return 2;
+    case G_CLVOL: return 100;
     case G_SPLIT: return 3;
     case G_POINT: return NKEYS - 1;
     case G_SCALE_L: case G_SCALE_R: return NSCALE;
@@ -603,6 +608,8 @@ static int knob_get(int code)
     case G_SVEL: return step_vel(&sq.s.st[sq.trk][ui.cursor]);
     case G_SGATE: return step_gate(&sq.s.st[sq.trk][ui.cursor]);
     case G_SNOTE: return step_low(&sq.s.st[sq.trk][ui.cursor]);
+    case G_CLICK: return set.click > 2 ? 0 : set.click;
+    case G_CLVOL: return set.click_vol ? set.click_vol : 60;
     case G_SPLIT: return set.split_oct;
     case G_POINT: return set.split_key;
     case G_SCALE_L: return set.scale_l;
@@ -650,7 +657,7 @@ static void knob_put(int code, int v)
         seq_changed();
         return;
     }
-    if (code >= G_STEP) {
+    if (code >= G_STEP && code <= G_SNOTE) {
         step_t *sp = &sq.s.st[sq.trk][ui.cursor];
         if (code == G_STEP) {
             ui.cursor = (int16_t)(v - 1);
@@ -694,6 +701,8 @@ static void knob_put(int code, int v)
             latch_down();                /* on: the left keys down now stay */
         break;
     case G_BALANCE: set.balance = (int8_t)v; break;
+    case G_CLICK: set.click = (uint8_t)v; break;
+    case G_CLVOL: set.click_vol = (uint8_t)(v ? v : 1); break;
     }
     sound_globals();
     dirty();
@@ -703,7 +712,7 @@ static const char *knob_name(int code)
     static const char *const G[] = {"BPM", "SWING", "KEY VEL", "MIDI CH", "MODE", "RATE", "OCTAVES", "GATE", "TRACK",
                                     "LENGTH", "RATE", "TRANSPOSE", "SPLIT", "POINT", "SCALE L", "SCALE R", "KEY",
                                     "FOLLOW", "LOW HOLD", "BALANCE", "TRACK 1", "TRACK 2", "TRACK 3", "TRACK 4", "STEP",
-                                    "VELOCITY", "GATE", "NOTE"};
+                                    "VELOCITY", "GATE", "NOTE", "CLICK", "VOLUME"};
     return code < NPARAM ? PARAMS[code].name : G[code - G_BPM];
 }
 static int rate_sync(int code)            /* an LFO's RATE while it is synced: its SYNC parameter (else -1) */
@@ -753,6 +762,11 @@ static void knob_text(int code, char *b)
             note_text(v, b);
         break;
     case G_MUTE1: case G_MUTE2: case G_MUTE3: case G_MUTE4: text_cat(b, v ? "MUTE" : "ON"); break;
+    case G_CLICK: text_cat(b, v == 1 ? "ON" : v == 2 ? "REC" : "OFF"); break;
+    case G_CLVOL:
+        int_text(v, b);
+        text_cat(b, "%");
+        break;
     case G_MCH:
         if (v == 0)
             text_cat(b, "ALL");
@@ -796,7 +810,7 @@ static int knob_choice(int code)         /* one detent, one value (no accelerati
     if (code < NPARAM)
         return PARAMS[code].kind == PK_CHOICE || PARAMS[code].max <= 48;
     return code != G_BPM && code != G_KVEL && code != G_SWING && code != G_ARP_GATE && code != G_SGATE
-           && code != G_BALANCE && code != G_SVEL;
+           && code != G_BALANCE && code != G_SVEL && code != G_CLVOL;
 }
 static int knob_centred(int code)        /* a bipolar knob: it rests at its centre */
 {
@@ -929,6 +943,49 @@ static void cursor_move(int d)
     ui.redraw = 1;
 }
 
+/* live: each note's step and when it went down, so its length is recorded as played: within a step its gate; longer,
+ * TIEs over the steps it holds on (as far as they are free), the last one's gate where it was let go */
+static const uint8_t RATE_TK[NRATE] = {12, 8, 6, 4, 3};
+static int16_t live_st[128];             /* (-1: none; app_init) */
+static float live_t0[128];
+static uint8_t live_fresh[128];
+
+static void live_up(int note)
+{
+    int st = live_st[note & 127], len = seq_len(), n, i;
+    float L = (float)RATE_TK[sq.t[sq.trk].rate], d = eng_clock_now() - live_t0[note & 127], steps;
+    step_t *sp;
+    live_st[note & 127] = -1;
+    if (st < 0 || st >= len)
+        return;
+    steps = d / L;
+    n = (int)(steps + 0.95f);            /* the steps it reaches into (a hair short of one: still that one) */
+    if (n < 1)
+        n = 1;
+    if (n > len - 1)
+        n = len - 1 > 0 ? len - 1 : 1;
+    sp = step_at(st);
+    if (n == 1) {
+        int g = (int)(steps * 100.0f + 0.5f);
+        g = g < 5 ? 5 : g > 100 ? 100 : g;
+        if (live_fresh[note & 127] || g > sp->gate)
+            sp->gate = (uint8_t)g;
+    } else {
+        sp->gate = 100;
+        for (i = 1; i < n; i++) {
+            step_t *tp = step_at((st + i) % len);
+            float rest = steps - (float)i;
+            int g = (int)(rest * 100.0f + 0.5f);
+            if (step_low(tp) && tp->note[0] != SN_TIE)
+                break;                   /* a step with notes of its own: the held note stops there */
+            memset(tp->note, 0, sizeof tp->note);
+            tp->note[0] = SN_TIE;
+            tp->gate = (uint8_t)(i < n - 1 || g > 100 ? 100 : g < 5 ? 5 : g);
+        }
+    }
+    seq_changed();
+}
+
 /* a note down / up for the recording (keys and MIDI): live into the nearest step, or a step's chord */
 static void rec_down(int note, int vel)
 {
@@ -936,8 +993,12 @@ static void rec_down(int note, int vel)
         return;
     if (eng_playing()) {
         int st = eng_seq_nearest(sq.trk);
-        if (st >= 0)
+        if (st >= 0) {
+            live_fresh[note & 127] = (uint8_t)(step_low(step_at(st)) == 0);
             step_add(st, note, vel);
+            live_st[note & 127] = (int16_t)st;
+            live_t0[note & 127] = eng_clock_now();
+        }
         return;
     }
     if (ui.rec_held == 0) {
@@ -951,8 +1012,12 @@ static void rec_down(int note, int vel)
         ui.chord_vel = (uint8_t)vel;
 }
 
-static void rec_up(void)
+static void rec_up(int note)
 {
+    if (ui.rec && eng_playing()) {
+        live_up(note);
+        return;
+    }
     if (!ui.rec || eng_playing() || ui.rec_held == 0)
         return;
     if (--ui.rec_held == 0 && ui.chord_n) {   /* every finger off: the chord into the step, on to the next */
@@ -1071,7 +1136,7 @@ static void key_stop(uint32_t k)
 {
     if (key_sounding[k] >= 0) {
         note_up(key_sounding[k], 1);
-        rec_up();
+        rec_up(key_sounding[k]);
     }
     key_sounding[k] = -1;
     latched &= ~(1u << k);
@@ -1191,6 +1256,13 @@ static void pressure_input(uint32_t keys)
     }
 }
 
+/* the metronome: ON while the sequencer plays, REC only while recording */
+static void click_update(void)
+{
+    int m = set.click > 2 ? 0 : set.click;
+    eng_click(m == 1 || (m == 2 && ui.rec), (float)(set.click_vol ? set.click_vol : 60) * 0.01f);
+}
+
 /* a track selected: the keys play its sound from now (the notes held still let go on theirs), the pages show it, REC
  * writes into it, the arp plays it */
 static void track_select(int t)
@@ -1238,6 +1310,7 @@ static void preset_browse(int32_t e)
 static void rec_toggle(void)
 {
     ui.rec = (uint8_t)!ui.rec;
+    click_update();
     ui.chord_n = ui.rec_held = 0;
     if (ui.rec) {
         if (!eng_playing()) {
@@ -1276,7 +1349,10 @@ static void button(uint32_t i)
     case B_HOME:
         ui.home_t = plat_ms();
         /* fall through */
-    case B_SEL: case B_ENV: case B_LFO: case B_EDIT: case B_FX: case B_GLO: case B_SEQ: {
+    case B_SEQ:
+        ui.seq_t = plat_ms();
+        /* fall through */
+    case B_SEL: case B_ENV: case B_LFO: case B_EDIT: case B_FX: case B_GLO: {
         static const uint8_t FIRST[NB] = {[B_HOME] = PG_FILTER, [B_SEL] = PG_OSC1, [B_ENV] = PG_FENV,
                                           [B_LFO] = PG_LFO, [B_EDIT] = PG_POLY, [B_FX] = PG_FXB,
                                           [B_GLO] = PG_VOICE, [B_SEQ] = PG_SEQ};
@@ -1369,6 +1445,17 @@ static void held_buttons(uint32_t btn)
             app_say("TRACK", "CLEARED");
         }
     }
+    if (ui.seq_t) {                      /* SEQ held: the metronome on / off */
+        if (!(btn >> B_SEQ & 1u))
+            ui.seq_t = 0;
+        else if (now - ui.seq_t >= 1000u) {
+            ui.seq_t = 0;
+            set.click = set.click ? 0 : 1;
+            click_update();
+            dirty();
+            app_say("METRONOME", set.click ? "ON" : "OFF");
+        }
+    }
     if (ui.arp_t) {                      /* ARP held: HOLD */
         if (!(btn >> B_ARP & 1u))
             ui.arp_t = 0;
@@ -1436,7 +1523,7 @@ static void input(void)
         if (mrec_on[k])
             rec_down(mrec_note[k], mrec_vel[k]);
         else
-            rec_up();
+            rec_up(mrec_note[k]);
         mrec_r++;
     }
     if (keys != ui.keys || btn != ui.btn)
@@ -1948,6 +2035,14 @@ static void page_visual(int32_t x, int32_t y, int32_t w, int32_t h)
             cv_text(x + 150, y + 4, &FONT_B, "HOLD", K_CREAM);
         break;
     }
+    case PG_CLICK: {                     /* the bar's four beats, the one now lit */
+        int b2, bt = eng_beat();
+        for (b2 = 0; b2 < 4; b2++) {
+            int32_t bx = x + 14 + b2 * 52;
+            cv_rect(bx, y + 6, 40, 18, b2 == bt ? (b2 == 0 ? K_RED : K_CREAM) : K_CELL);
+        }
+        break;
+    }
     case PG_SEQ:
     case PG_MUTE:
     case PG_STEP: {                      /* the four tracks: their steps (those with notes), their length, the playheads */
@@ -2332,6 +2427,8 @@ void app_init(void)
     sound_globals();
     for (k = 0; k < NKEYS; k++)
         key_sounding[k] = -1;
+    for (k = 0; k < 128; k++)
+        live_st[k] = -1;
     ui.copy_to = -1;
 }
 
@@ -2453,6 +2550,19 @@ int app_expect(const char *what, int *got)
         *got = sq.trk;
     else if (!strcmp(what, "len"))
         *got = seq_len();
+    else if (!strcmp(what, "click"))
+        *got = set.click;
+    else if (!strcmp(what, "ties") || !strcmp(what, "gmin")) {   /* the selected track: its TIEs; its shortest gate */
+        int i, c = 0, gm = 101;
+        for (i = 0; i < seq_len(); i++) {
+            const step_t *sp = step_at(i);
+            if (sp->note[0] == SN_TIE)
+                c++;
+            else if (step_low(sp) && sp->gate < gm)
+                gm = sp->gate;
+        }
+        *got = what[0] == 't' ? c : gm;
+    }
     else if (!strncmp(what, "vt", 2)) {  /* vtN: the voices sounding track N's sound */
         int v, c = 0;
         for (v = 0; v < NVOICE; v++)

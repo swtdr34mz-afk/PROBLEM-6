@@ -150,11 +150,14 @@ int eng_playing(void);
 int eng_seq_step(int t);                /* track t's step playing (-1: stopped) */
 int eng_seq_nearest(int t);             /* its step a note played now belongs to (quantised), -1 stopped */
 void eng_tempo(float bpm, float swing); /* BPM, swing 0..0.5 */
+void eng_click(int on, float level);    /* the metronome while the sequencer plays: on, its level 0..1 */
 float eng_bpm(void);                    /* the tempo now (heard in MIDI clock, if it comes) */
 enum { CLK_TICK, CLK_START, CLK_STOP, CLK_CONT };
 void eng_clock(int what);               /* MIDI real time in (from the 1 kHz tick) */
 int eng_clock_ext(void);                /* 1: MIDI clock is coming in */
 uint32_t eng_beats(void);               /* quarter notes since the start (the screen) */
+float eng_clock_now(void);              /* the clock now, in ticks (24 a quarter, with the fraction) */
+int eng_beat(void);                     /* the beat of the bar since PLAY 0..3 (-1: stopped) */
 
 enum { ARP_UP, ARP_DOWN, ARP_UPDOWN, ARP_RANDOM, ARP_PLAYED, NARP };
 void eng_arp(int on, int mode, int rate, int octaves, float gate);

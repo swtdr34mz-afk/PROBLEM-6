@@ -98,8 +98,8 @@ static void seq_fire(int t, int st)
         return;
     }
     if (sp->note[0] == SN_TIE) {
-        if (on_n[t])
-            on_left[t] = len * g + len;  /* longer: through this step too */
+        if (on_n[t])                     /* held on through this step, for its gate */
+            on_left[t] = len * g + (g >= 0.99f ? 160.0f : 0.0f);
         return;
     }
     seq_release(t);
@@ -113,7 +113,7 @@ static void seq_fire(int t, int st)
         voice_on(SRC_SEQ | TRK_ID(t) | note, note, vel);
         on_note[t][on_n[t]++] = (int8_t)note;
     }
-    on_left[t] = len * g;
+    on_left[t] = len * g + (g >= 0.99f ? 160.0f : 0.0f);   /* (a full gate: on until the next step takes over) */
 }
 
 static void seq_tick(void)
@@ -219,9 +219,15 @@ static void arp_tick_(void)
     }
 }
 
+static uint32_t beat_tick;               /* ticks since PLAY (the metronome's count) */
 static void tick(void)
 {
     ticks++;
+    if (playing) {                       /* the metronome: each quarter, the bar's first higher */
+        if (beat_tick % 24u == 0u)
+            click_beat(beat_tick % 96u == 0u);
+        beat_tick++;
+    }
     seq_tick();
     arp_tick_();
 }
@@ -251,6 +257,7 @@ void clock_block(uint32_t n)
                     step_tick[t] = 0;
                 }
                 arp_tick = 0;
+                beat_tick = 0;
             }
             playing = seq != 0;
         }
@@ -329,6 +336,7 @@ void eng_play(int on)
         step[t] = -1;
         step_tick[t] = 0;
     }
+    beat_tick = 0;
     if (on) {
         acc = spt;                       /* the first step at once */
         playing = 1;
@@ -363,6 +371,8 @@ void eng_clock(int what)
 }
 int eng_clock_ext(void) { return ext_last_blk && blk_count - ext_last_blk < 172u; }   /* a clock within 0.5 s */
 uint32_t eng_beats(void) { return ticks / 24u; }
+float eng_clock_now(void) { return clock_pos(); }
+int eng_beat(void) { return playing && beat_tick ? (int)((beat_tick - 1u) / 24u % 4u) : -1; }
 
 void eng_arp(int on, int mode, int r, int oct, float g)
 {

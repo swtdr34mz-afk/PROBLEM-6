@@ -25,6 +25,7 @@
 enum { SRC_KEY = 0x000, SRC_SEQ = 0x100, SRC_ARP = 0x200 };
 void voice_on(int id, int note, float vel);
 void voice_off(int id);
+void click_beat(int accent);           /* the metronome: a beat (the clock, in the render) */
 
 /* the effects: their parameters (main loop) and the block (render: the voices' sum in, the output out, in place) */
 void fx_init(void);
