@@ -21,17 +21,18 @@ static float since_ext;                  /* samples since the last one */
 static volatile uint8_t ext_cmd;         /* a START / STOP / CONTINUE waiting */
 
 /* ------------------------------------------------------------ the sequencer --- */
+static uint32_t beat_tick;               /* ticks since PLAY (the sequencer's and the metronome's count) */
 /* four tracks, each on its own: its length, rate, transpose, mute, where it is, the notes it holds */
 static const seq_t *seq;
 static uint8_t playing;
-static uint8_t tlen[NTRK] = {16, 16, 16, 16}, trate[NTRK] = {RATE_16, RATE_16, RATE_16, RATE_16}, tmute[NTRK];
+static uint8_t tlen[NTRK], trate[NTRK], tmute[NTRK];   /* (clock_init) */
 static int8_t ttr[NTRK];
-static int16_t step[NTRK] = {-1, -1, -1, -1};   /* the step playing */
+static int16_t step[NTRK];               /* the step playing */
 static uint8_t step_tick[NTRK];          /* ticks into it */
 static uint8_t on_n[NTRK];               /* the step's notes sounding */
 static int8_t on_note[NTRK][SEQ_POLY];
-static float on_left[NTRK] = {-1.0f, -1.0f, -1.0f, -1.0f};   /* samples until they are let go (< 0: held) */
-static float swing_wait[NTRK] = {-1.0f, -1.0f, -1.0f, -1.0f};   /* a swung step waits this long (-1: none waiting) */
+static float on_left[NTRK];              /* samples until they are let go (< 0: held) */
+static float swing_wait[NTRK];           /* a swung step waits this long (-1: none waiting) */
 static int16_t swing_step[NTRK];
 
 /* -------------------------------------------------------------- the arp --- */
@@ -48,7 +49,16 @@ static float arp_left = -1.0f;
 static uint8_t arp_trk;                  /* the track it plays */
 static uint32_t arp_steps_n, arp_seed = 0xA5A5F00Du;
 
-void clock_init(void) {}
+void clock_init(void)
+{
+    int t;
+    for (t = 0; t < NTRK; t++) {
+        tlen[t] = 16;
+        trate[t] = RATE_16;
+        step[t] = -1;
+        on_left[t] = swing_wait[t] = -1.0f;
+    }
+}
 
 static void seq_release(int t)
 {
@@ -116,15 +126,18 @@ static void seq_fire(int t, int st)
     on_left[t] = len * g + (g >= 0.99f ? 160.0f : 0.0f);   /* (a full gate: on until the next step takes over) */
 }
 
-static void seq_tick(void)
+/* each track's place: from the ticks since PLAY (pt), not counted on step by step: so every track stays on the bar
+ * (and on the metronome) whatever its LENGTH or RATE, and whenever they are changed while it plays */
+static void seq_tick(uint32_t pt)
 {
     int t;
     if (!playing || !seq)
         return;
-    for (t = 0; t < NTRK; t++)
-        if (step[t] < 0 || ++step_tick[t] >= RATE_TICKS[trate[t]]) {
-            step_tick[t] = 0;
-            step[t] = (int16_t)(step[t] + 1 >= tlen[t] ? 0 : step[t] + 1);
+    for (t = 0; t < NTRK; t++) {
+        uint32_t rt = RATE_TICKS[trate[t]];
+        step_tick[t] = (uint8_t)(pt % rt);
+        if (step_tick[t] == 0u) {
+            step[t] = (int16_t)((pt / rt) % tlen[t]);
             if ((step[t] & 1) && swing > 0.0f) {   /* the odd steps a little late */
                 swing_wait[t] = swing * spt_now() * (float)RATE_TICKS[trate[t]];
                 swing_step[t] = step[t];
@@ -132,6 +145,7 @@ static void seq_tick(void)
                 seq_fire(t, step[t]);
             }
         }
+    }
 }
 
 /* ---------------------------------------------------------------- the arp --- */
@@ -219,16 +233,15 @@ static void arp_tick_(void)
     }
 }
 
-static uint32_t beat_tick;               /* ticks since PLAY (the metronome's count) */
 static void tick(void)
 {
     ticks++;
     if (playing) {                       /* the metronome: each quarter, the bar's first higher */
-        if (beat_tick % 24u == 0u)
-            click_beat(beat_tick % 96u == 0u);
-        beat_tick++;
+        uint32_t pt = beat_tick++;
+        if (pt % 24u == 0u)
+            click_beat(pt % 96u == 0u);
+        seq_tick(pt);
     }
-    seq_tick();
     arp_tick_();
 }
 

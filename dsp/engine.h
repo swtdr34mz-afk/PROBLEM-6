@@ -22,7 +22,8 @@
 
 #define ENG_SR 44100.0f
 #define NVOICE 7
-#define NTRK 4                          /* the tracks: each its own sound and its own line in the sequencer */
+#define NTRK 2                          /* the tracks: each its own sound and its own line in the sequencer (two: the seven
+                                         * voices go round) */
 /* a note's id: its source (keys, sequencer, arp), its track, its note */
 #define TRK_ID(t) ((t) << 10)
 #define ID_TRK(id) (((id) >> 10) & 3)
@@ -128,7 +129,7 @@ float eng_lfo(int which);               /* LFO 1 (0) or 2 (1) now, -1..1 */
 /* ---------------------------------------------------- the clock, sequencer and arp --- */
 /* A 24-per-quarter clock runs in the render: from BPM, or MIDI clock coming in. The sequencer and the arp step on it,
  * on time to within an audio block (2.9 ms). */
-/* The sequencer: four tracks of 64 steps, each track its own line (and its own sound, its notes' ids carry it), its
+/* The sequencer: two tracks of 64 steps, each track its own line (and its own sound, its notes' ids carry it), its
  * own length, rate, transpose and mute. A step: a note or a chord, its velocity, its gate */
 #define TRK_STEPS 64
 #define SEQ_POLY 7                      /* notes a step holds */

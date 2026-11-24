@@ -1,4 +1,4 @@
-# the four tracks: each its own sound and line; step record with velocity, step edit, mute, playback together,
+# the two tracks: each its own sound and line; step record with velocity, step edit, mute, playback together,
 # the effects shared
 wait 2000
 expect trk 0
@@ -85,12 +85,10 @@ expect page 10
 turn K2 127
 expect rv1 127
 expect rv0 127
-expect rv2 127
-# live record keeps the lengths played: track 3, a note held three steps (TIEs), a short one (a short gate)
+# live record keeps the lengths played: track 2, a note held three steps (TIEs), a short one (a short gate)
 tap SEQ
 expect page 15
-turn K1 1
-expect trk 2
+expect trk 1
 tap PLAY
 expect playing 1
 tap REC

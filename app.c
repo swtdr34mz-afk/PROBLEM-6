@@ -22,8 +22,8 @@
  *                   again CHORUS (MIX, RATE, DEPTH, DISTORT)
  *   GLO             VOICE (GLIDE, VELOCITY, UNISON, BEND); again CLOCK (BPM, SWING, KEY VEL, MIDI CH)
  *   ARP             the arp on, and its page (MODE, RATE, OCTAVES, GATE); again: off. Held 1 s: HOLD
- *   SEQ             TRACK page (TRACK 1-4: the one the keys play, the pages edit, REC writes; LENGTH 1-64, RATE,
- *                   TRANSPOSE); again MUTES (each track)
+ *   SEQ             TRACK page (TRACK 1-2: the one the keys play, the pages edit, REC writes; LENGTH 1-64, RATE,
+ *                   TRANSPOSE); again MUTES & CLICK (MUTE 1, MUTE 2, the metronome's CLICK, VOLUME)
  *   PLAY            the four tracks from the top / stop (SEQ held 1 s: the metronome on / off; GLO's 4th page: METRONOME)
  *   REC             record into the selected track: stopped, step by step on the STEP EDIT page (a chord at a time,
  *                   at its velocity; K1 / PRESET move the step, K2 its VELOCITY, K3 its GATE, K4 its NOTE; SEQ a rest,
@@ -41,7 +41,8 @@
 #define SET_MAGIC_V2 0x32374850u         /* "PH72": v0.2's: 62, CUTOFF 0..127 */
 #define SET_MAGIC_V1 0x31374850u         /* "PH71": v0.1's: 54, CUTOFF 0..127 */
 #define SEQ_MAGIC_V1 0x51534850u         /* "PHSQ": up to v1.0, one line of 16 bars of chords */
-#define SONG_MAGIC 0x34534850u           /* "PHS4": v1.1, four tracks of 64 steps, each its own sound */
+#define SONG_MAGIC_4 0x34534850u         /* "PHS4": a v1.1 test build's: four tracks */
+#define SONG_MAGIC 0x32534850u           /* "PHS2": v1.1, two tracks of 64 steps, each its own sound */
 #define OLD_BARS 16
 #define FX_PARAM(p) ((p) == P_CH_MIX || (p) == P_CH_RATE || (p) == P_CH_DEPTH || (p) == P_DIST || ((p) >= P_RV_TYPE && (p) <= P_SP_PRE) || ((p) >= P_DL_TIME_L && (p) <= P_DL_SYNC))
 
@@ -275,7 +276,7 @@ static void settings_load(void)
 /* a fresh song: track 1 the preset playing, then a bass, a pluck and a lead, their lines empty, a bar each */
 static void song_defaults(void)
 {
-    static const uint8_t PRE[NTRK] = {0, 3, 8, 2};   /* (POLY PAD, FAT BASS, PLUCK, SYNC LEAD) */
+    static const uint8_t PRE[NTRK] = {0, 3}; /* (POLY PAD, FAT BASS) */
     int t, k;
     memset(&sq, 0, sizeof sq);
     sq.magic = SONG_MAGIC;
@@ -311,19 +312,31 @@ static int song_ok(void)
     return 1;
 }
 
-/* the song as kept; or v1.0's sequence, into track 1 (its first 64 steps, its bars, rate, gate, transpose) */
+/* the song as kept; or a 4-track test build's (its first two tracks); or v1.0's sequence, into track 1 (its first 64
+ * steps, its bars, rate, gate, transpose) */
 static void song_load(void)
 {
     static uint8_t raw[PLAT_STORE_MAX];
     int n = plat_store_load(OBJ_SEQ, raw, sizeof raw);
+    uint32_t magic = n >= 4 ? (uint32_t)raw[0] | (uint32_t)raw[1] << 8 | (uint32_t)raw[2] << 16 | (uint32_t)raw[3] << 24 : 0;
     if (n == (int)sizeof sq) {
         memcpy(&sq, raw, sizeof sq);
         if (song_ok())
             return;
     }
     song_defaults();
-    if (n == 4 + OLD_BARS * 16 * SEQ_POLY
-        && ((uint32_t)raw[0] | (uint32_t)raw[1] << 8 | (uint32_t)raw[2] << 16 | (uint32_t)raw[3] << 24) == SEQ_MAGIC_V1) {
+    if (magic == SONG_MAGIC_4 && n == (int)(8 + 4 * sizeof(track_t) + 4 * TRK_STEPS * sizeof(step_t))) {
+        uint8_t trk = raw[4];
+        memcpy(sq.t, raw + 8, sizeof sq.t);
+        memcpy(sq.s.st, raw + 8 + 4 * sizeof(track_t), sizeof sq.s.st);
+        sq.magic = SONG_MAGIC;
+        sq.trk = (uint8_t)(trk < NTRK ? trk : 0);
+        if (!song_ok())
+            song_defaults();
+        seq_dirty = 1;
+        return;
+    }
+    if (n == 4 + OLD_BARS * 16 * SEQ_POLY && magic == SEQ_MAGIC_V1) {
         int i, k, len = set.seq_bars * 16;
         for (i = 0; i < TRK_STEPS; i++) {
             for (k = 0; k < SEQ_POLY; k++)
@@ -457,7 +470,7 @@ static const page_t PAGES[NPAGES] = {
     [PG_CLICK] = {"METRONOME", B_GLO, PG_VOICE, {G_CLICK, G_CLVOL, G_BPM, G_SWING}},
     [PG_ARP] = {"ARPEGGIATOR", B_ARP, PG_ARP, {G_ARP_MODE, G_ARP_RATE, G_ARP_OCT, G_ARP_GATE}},
     [PG_SEQ] = {"TRACK", B_SEQ, PG_MUTE, {G_TRK, G_TLEN, G_TRATE, G_TTR}},
-    [PG_MUTE] = {"MUTES", B_SEQ, PG_SEQ, {G_MUTE1, G_MUTE2, G_MUTE3, G_MUTE4}},
+    [PG_MUTE] = {"MUTES & CLICK", B_SEQ, PG_SEQ, {G_MUTE1, G_MUTE2, G_CLICK, G_CLVOL}},
     [PG_STEP] = {"STEP EDIT", B_SEQ, PG_SEQ, {G_STEP, G_SVEL, G_SGATE, G_SNOTE}},
 };
 
@@ -2045,24 +2058,24 @@ static void page_visual(int32_t x, int32_t y, int32_t w, int32_t h)
     }
     case PG_SEQ:
     case PG_MUTE:
-    case PG_STEP: {                      /* the four tracks: their steps (those with notes), their length, the playheads */
+    case PG_STEP: {                      /* the two tracks: their steps (those with notes), their length, the playheads */
         int t2, i2;
         for (t2 = 0; t2 < NTRK; t2++) {
-            int32_t ly = y + t2 * 7 + 1, lx = x + 16;
+            int32_t ly = y + t2 * 15 + 2, lx = x + 16;
             int st = eng_seq_step(t2), len = sq.t[t2].len, sel = t2 == sq.trk, mute = sq.t[t2].mute;
-            cv_rect(x + 4, ly, 8, 5, sel ? K_RED : mute ? K_PANEL : K_GREY);   /* its mark: selected, muted */
+            cv_rect(x + 4, ly, 8, 11, sel ? K_RED : mute ? K_PANEL : K_GREY);   /* its mark: selected, muted */
             if (mute)
-                frame_rect(x + 4, ly, 8, 5, K_DIM);
+                frame_rect(x + 4, ly, 8, 11, K_DIM);
             for (i2 = 0; i2 < TRK_STEPS; i2++) {
                 const step_t *sp = &sq.s.st[t2][i2];
                 uint16_t c = i2 >= len ? K_PANEL : sp->note[0] == SN_TIE ? K_RED_M : step_low(sp) ? (mute ? K_GREY : K_RED)
                                                                                         : K_CELL;
                 if (i2 < len && i2 == st)
                     c = K_CREAM;
-                cv_rect(lx + i2 * 3, ly, 2, 5, c);
+                cv_rect(lx + i2 * 3, ly, 2, 11, c);
             }
             if (sel)
-                frame_rect(lx - 2, ly - 1, TRK_STEPS * 3 + 3, 7, K_GREY);
+                frame_rect(lx - 2, ly - 2, TRK_STEPS * 3 + 3, 15, K_GREY);
         }
         break;
     }
@@ -2293,33 +2306,33 @@ static void draw_seq(void)
     cv_text(194, 199, &FONT_XS, eng_arp_on() ? "ARP" : RATE_NAME[sq.t[sq.trk].rate], eng_arp_on() ? K_RED : K_GREY);
     for (i = 0; i < 16; i++) {
         int s = page * 16 + i, n = 0, k, tie;
-        int32_t x = 8 + i * 14, y = 213;
+        int32_t x = 6 + i * 14, y = 211;
         const step_t *sp = &sq.s.st[sq.trk][s];
         tie = sp->note[0] == SN_TIE;
         for (k = 0; k < SEQ_POLY; k++)
             if (sp->note[k] >= 12)
                 n++;
-        cv_rect(x, y, 12, 16, s < len ? K_CELL : K_PANEL);
-        cv_rect(x, y, 12, 3, s < len ? RGB(66, 66, 70) : K_PANEL);
+        cv_rect(x, y, 13, 18, s < len ? K_CELL : K_PANEL);
+        cv_rect(x, y, 13, 3, s < len ? RGB(66, 66, 70) : K_PANEL);
         if (n) {                         /* its notes: as loud as tall, as long as wide; a chord: a mark on top */
-            int32_t hgt = 3 + step_vel(sp) * 13 / 127, wid = 2 + step_gate(sp) * 10 / 100;
-            cv_rect(x, y + 16 - hgt, wid, hgt, s < len ? K_RED : K_RED_M);
+            int32_t hgt = 3 + step_vel(sp) * 15 / 127, wid = 2 + step_gate(sp) * 11 / 100;
+            cv_rect(x, y + 18 - hgt, wid, hgt, s < len ? K_RED : K_RED_M);
             if (n > 1)
-                cv_rect(x + 4, y + 16 - hgt - 3, 4, 2, K_CREAM);
+                cv_rect(x + 4, y + 18 - hgt - 3, 5, 2, K_CREAM);
         }
         if (tie)
-            cv_rect(x - 2, y + 9, 16, 4, K_RED_M);
+            cv_rect(x - 1, y + 10, 15, 4, K_RED_M);
         if (s == st)
-            frame_rect(x - 1, y - 1, 14, 18, K_CREAM);
+            frame_rect(x - 1, y - 1, 15, 20, K_CREAM);
         if (writing && s == ui.cursor && (frame_n & 8u))
-            frame_rect(x - 1, y - 1, 14, 18, K_CREAM);
+            frame_rect(x - 1, y - 1, 15, 20, K_CREAM);
         if ((i & 3) == 0) {
             int_text(s + 1, t);
             cv_text(x + (s < 9 ? 3 : 0), 230, &FONT_XS, t, i == 0 ? K_CREAM : K_GREY);
         }
     }
     if (st >= 0 && st / 16 == page)      /* the playhead */
-        cv_rect(8 + (st & 15) * 14 + 6, 211, 1, 20, K_CREAM);
+        cv_rect(6 + (st & 15) * 14 + 6, 209, 1, 22, K_CREAM);
 }
 
 static void draw_msg(void)
