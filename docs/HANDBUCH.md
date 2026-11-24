@@ -64,8 +64,89 @@ eigene Gefahr.
 
 ## MIDI
 
-Eingang (USB und TRS): Noten mit Anschlagstärke, Pitch Bend, CC 1 (Modrad: mehr LFO), CC 64 (Sustain), CC 74 (Cutoff),
-Clock mit START/STOP/CONTINUE. Ausgang (USB): die Noten der Tasten.
+Eingang (USB und TRS): Noten mit Anschlagstärke, Druck (pro Taste oder Kanal), Pitch Bend, die CCs unten, Clock mit
+START/STOP/CONTINUE. Ausgang (USB): die Noten der Tasten.
+
+### MIDI-CC-Liste (ab v1.4)
+
+Fast jeder Regler lässt sich von einem Controller aus steuern. Wo der Prophet-6 denselben Regler hat, ist es seine
+CC-Nummer, sodass Prophet-6-Vorlagen für Controller und Editoren direkt passen. Der Rest liegt auf CCs, die der Prophet-6
+frei lässt. 0–127 deckt den ganzen Regler ab, bei Auswahl-Reglern (z. B. LFO SHAPE) die Möglichkeiten gleichmäßig
+verteilt. Ein CC ändert den Sound der Spur, die gerade angezeigt ist (Sequencer-Spur 1 oder 2), auf dem eingestellten
+MIDI-Kanal (GLO → CLOCK → MIDI CH). Danach leuchtet SAVE wie beim Drehen am Gerät.
+
+| CC | Regler | Hinweis |
+|---|---|---|
+| 1 | MOD WHEEL | mehr LFO 1 |
+| 5 | GLIDE | Glide-Zeit (wie Prophet-6) |
+| 8 | OSC 1 SUB OCT | Sub-Oszillator (wie Prophet-6) |
+| 9 | DISTORT | Verzerrung (wie Prophet-6) |
+| 14 | LFO 1 RATE |  |
+| 15 | LFO 1 AMOUNT |  |
+| 16 | LFO 1 SHAPE | Auswahl |
+| 17 | LFO 1 DEST | Auswahl |
+| 18 | LFO 2 RATE |  |
+| 19 | LFO 2 AMOUNT |  |
+| 20 | LFO 2 SHAPE | Auswahl |
+| 21 | LFO 2 DEST | Auswahl |
+| 22 | POLY MOD FILT ENV |  |
+| 23 | POLY MOD OSC 2 |  |
+| 24 | POLY MOD OSC 1 TO | Auswahl |
+| 25 | POLY MOD FILTER TO | Auswahl |
+| 26 | NOISE | Mixer |
+| 27 | OSC 2 MODE | normal / Sync / Low Freq |
+| 28 | VINTAGE | SELECT |
+| 29 | VOICE SPREAD | ALGORITHM |
+| 30 | UNISON | aus / an |
+| 41 | AMP VELOCITY |  (wie Prophet-6) |
+| 43 | AMP ATTACK |  (wie Prophet-6) |
+| 44 | AMP DECAY |  (wie Prophet-6) |
+| 45 | AMP SUSTAIN |  (wie Prophet-6) |
+| 46 | AMP RELEASE |  (wie Prophet-6) |
+| 47 | LPF ENV AMOUNT |  (wie Prophet-6) |
+| 50 | FILTER ATTACK |  (wie Prophet-6) |
+| 51 | FILTER DECAY |  (wie Prophet-6) |
+| 52 | FILTER SUSTAIN |  (wie Prophet-6) |
+| 53 | FILTER RELEASE |  (wie Prophet-6) |
+| 54 | HPF ENV AMOUNT |  (wie Prophet-6) |
+| 64 | SUSTAIN | Pedal |
+| 67 | OSC 1 FREQ |  (wie Prophet-6) |
+| 69 | OSC 1 LEVEL | Mixer (wie Prophet-6) |
+| 70 | OSC 1 SHAPE |  (wie Prophet-6) |
+| 71 | OSC 1 PW |  (wie Prophet-6) |
+| 74 | BRIGHTNESS | wird zum Cutoff addiert (wie Prophet-6) |
+| 75 | OSC 2 FREQ |  (wie Prophet-6) |
+| 76 | OSC 2 FINE |  (wie Prophet-6) |
+| 77 | OSC 2 LEVEL | Mixer (wie Prophet-6) |
+| 78 | OSC 2 SHAPE |  (wie Prophet-6) |
+| 79 | OSC 2 PW |  (wie Prophet-6) |
+| 80 | AFTERTOUCH AMOUNT |  |
+| 81 | AFTERTOUCH DEST | Auswahl |
+| 85 | CHORUS MIX |  |
+| 86 | CHORUS RATE |  |
+| 87 | CHORUS DEPTH |  |
+| 88 | REVERB TYPE | Auswahl |
+| 89 | REVERB MIX |  |
+| 90 | REVERB DECAY |  |
+| 102 | LPF CUTOFF |  (wie Prophet-6) |
+| 103 | LPF RESONANCE |  (wie Prophet-6) |
+| 104 | LPF KEYBOARD | aus / halb / voll (wie Prophet-6) |
+| 105 | LPF VELOCITY |  (wie Prophet-6) |
+| 106 | HPF CUTOFF |  (wie Prophet-6) |
+| 107 | HPF RESONANCE |  (wie Prophet-6) |
+| 110 | REVERB TONE |  |
+| 111 | SPACE MOD |  |
+| 112 | SPACE SHIMMER |  |
+| 113 | SPACE SWELL |  |
+| 114 | SPACE PREDELAY |  |
+| 115 | DELAY MIX |  |
+| 116 | DELAY FEEDBACK |  |
+| 117 | DELAY TIME L |  |
+| 118 | DELAY TIME R |  |
+| 119 | DELAY TONE |  |
+| 120 | ALL SOUND OFF |  |
+| 123 | ALL NOTES OFF |  |
+
 
 ## Bitte testen
 

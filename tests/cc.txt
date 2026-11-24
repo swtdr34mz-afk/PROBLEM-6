@@ -1,0 +1,26 @@
+# MIDI CC: the knobs from a controller (Prophet-6 numbers where it has the knob)
+wait 2000
+# CC 102 (low-pass freq) 0, then 127: the cutoff knob (P 12) follows
+midi B0 66 00
+wait 20
+expect p12 0
+midi B0 66 7F
+wait 20
+expect p12 255
+# CC 5 (glide) 64: half way
+midi B0 05 40
+wait 20
+expect p48 64
+# CC 16 (LFO 1 shape, a choice of 5): 127 is the last (S+H)
+midi B0 10 7F
+wait 20
+expect p30 4
+# CC 88 (reverb type, 5): 0 the first
+midi B0 58 00
+wait 20
+expect p40 0
+expect edited 1
+# CC 1 still the mod wheel, 64 sustain, 74 brightness: no knob moves
+midi B0 4A 00
+wait 20
+expect p12 255

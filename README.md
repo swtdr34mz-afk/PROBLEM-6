@@ -188,9 +188,88 @@ how ROOM, HALL, PLATE or SPRING sound.
 | REC | record (step or live, above). Held 1 s: clear |
 | SAVE | keep the edited preset in its slot; held + PRESET: in another slot (on letting go). The SAVE light: edited, not saved |
 
-MIDI in (USB and TRS): notes with velocity, channel and poly pressure, pitch bend, CC 1 (mod wheel: more LFO), CC 64 (sustain), CC 74 (cutoff),
+MIDI in (USB and TRS): notes with velocity, channel and poly pressure, pitch bend, the CCs below,
 clock, START, STOP, CONTINUE. MIDI out (USB): the keys' notes. The settings (presets, globals) and the sequence can be
 backed up and restored over USB.
+
+### MIDI CC (v1.4)
+
+Nearly every knob takes a CC. Where the Prophet-6 has the same knob, it is the Prophet-6's number (its controller
+templates and editors fit); the rest sit on CCs the Prophet-6 leaves free. 0..127 spans the knob (a choice: its options,
+evenly). A CC edits the sound of the track on screen (the sequencer's track 1 or 2), on the MIDI channel set (GLO, CLOCK,
+MIDI CH).
+
+| CC | Knob | Note |
+|---|---|---|
+| 1 | MOD WHEEL | Mod wheel: more LFO 1 |
+| 5 | GLIDE | Glide time (as the Prophet-6) |
+| 8 | OSC 1 SUB OCT | Sub oscillator (as the Prophet-6) |
+| 9 | DISTORT | Distortion (as the Prophet-6) |
+| 14 | LFO 1 RATE |  |
+| 15 | LFO 1 AMOUNT |  |
+| 16 | LFO 1 SHAPE | choice |
+| 17 | LFO 1 DEST | choice |
+| 18 | LFO 2 RATE |  |
+| 19 | LFO 2 AMOUNT |  |
+| 20 | LFO 2 SHAPE | choice |
+| 21 | LFO 2 DEST | choice |
+| 22 | POLY MOD FILT ENV |  |
+| 23 | POLY MOD OSC 2 |  |
+| 24 | POLY MOD OSC 1 TO | choice |
+| 25 | POLY MOD FILTER TO | choice |
+| 26 | NOISE |  |
+| 27 | OSC 2 MODE | normal / sync / low freq |
+| 28 | VINTAGE |  |
+| 29 | VOICE SPREAD |  |
+| 30 | UNISON | off / on |
+| 41 | AMP VELOCITY |  (as the Prophet-6) |
+| 43 | AMP ATTACK |  (as the Prophet-6) |
+| 44 | AMP DECAY |  (as the Prophet-6) |
+| 45 | AMP SUSTAIN |  (as the Prophet-6) |
+| 46 | AMP RELEASE |  (as the Prophet-6) |
+| 47 | LPF ENV AMOUNT |  (as the Prophet-6) |
+| 50 | FILTER ATTACK |  (as the Prophet-6) |
+| 51 | FILTER DECAY |  (as the Prophet-6) |
+| 52 | FILTER SUSTAIN |  (as the Prophet-6) |
+| 53 | FILTER RELEASE |  (as the Prophet-6) |
+| 54 | HPF ENV AMOUNT |  (as the Prophet-6) |
+| 64 | SUSTAIN | pedal |
+| 67 | OSC 1 FREQ |  (as the Prophet-6) |
+| 69 | OSC 1 LEVEL | mixer (as the Prophet-6) |
+| 70 | OSC 1 SHAPE |  (as the Prophet-6) |
+| 71 | OSC 1 PW |  (as the Prophet-6) |
+| 74 | BRIGHTNESS | added to the cutoff (as the Prophet-6) |
+| 75 | OSC 2 FREQ |  (as the Prophet-6) |
+| 76 | OSC 2 FINE |  (as the Prophet-6) |
+| 77 | OSC 2 LEVEL | mixer (as the Prophet-6) |
+| 78 | OSC 2 SHAPE |  (as the Prophet-6) |
+| 79 | OSC 2 PW |  (as the Prophet-6) |
+| 80 | AFTERTOUCH AMOUNT |  |
+| 81 | AFTERTOUCH DEST | choice |
+| 85 | CHORUS MIX |  |
+| 86 | CHORUS RATE |  |
+| 87 | CHORUS DEPTH |  |
+| 88 | REVERB TYPE | choice |
+| 89 | REVERB MIX |  |
+| 90 | REVERB DECAY |  |
+| 102 | LPF CUTOFF |  (as the Prophet-6) |
+| 103 | LPF RESONANCE |  (as the Prophet-6) |
+| 104 | LPF KEYBOARD | off / half / full (as the Prophet-6) |
+| 105 | LPF VELOCITY |  (as the Prophet-6) |
+| 106 | HPF CUTOFF |  (as the Prophet-6) |
+| 107 | HPF RESONANCE |  (as the Prophet-6) |
+| 110 | REVERB TONE |  |
+| 111 | SPACE MOD |  |
+| 112 | SPACE SHIMMER |  |
+| 113 | SPACE SWELL |  |
+| 114 | SPACE PREDELAY |  |
+| 115 | DELAY MIX |  |
+| 116 | DELAY FEEDBACK |  |
+| 117 | DELAY TIME L |  |
+| 118 | DELAY TIME R |  |
+| 119 | DELAY TONE |  |
+| 120 | ALL SOUND OFF |  |
+| 123 | ALL NOTES OFF |  |
 
 ## The presets
 
@@ -241,6 +320,7 @@ stereo field, the sixteen bars). POLY MOD, VOICE SPREAD, VINTAGE and the sequenc
     build/host/prophet67_host tests/basic.txt build/host
     build/host/prophet67_host tests/seq.txt build/host
     build/host/prophet67_host tests/tracks.txt build/host
+    build/host/prophet67_host tests/cc.txt build/host
 
 GitHub Actions builds the `.fwsc` on every push (Actions → the run → Artifacts → prophet67-firmware), and puts the
 browser emulator on GitHub Pages. A tag `v*` makes a release with the `.fwsc` attached.

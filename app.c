@@ -1044,6 +1044,88 @@ static void rec_up(int note)
 static volatile uint8_t mrec_note[32], mrec_on[32], mrec_vel[32];
 static volatile uint32_t mrec_w, mrec_r;
 
+/* MIDI CC: the knobs from a controller. The numbers are the Prophet-6's where it has the same knob (its templates and
+ * editors work), the rest in the CCs it leaves free. 0..127 spans the knob (a choice: its options, evenly). The CC
+ * edits the sound of the track on screen (the sequencer's track 1 or 2); 1 (mod wheel), 64 (sustain), 74 (brightness:
+ * added to the cutoff) and 120/123 (all off) as before. Listed in docs/HANDBUCH.md and README.md. */
+static const uint8_t CC_MAP[][2] = {
+    {5, P_GLIDE},
+    {8, P_O1_SUB},
+    {9, P_DIST},
+    {14, P_LFO_RATE},
+    {15, P_LFO_AMT},
+    {16, P_LFO_SHAPE},
+    {17, P_LFO_DEST},
+    {18, P_L2_RATE},
+    {19, P_L2_AMT},
+    {20, P_L2_SHAPE},
+    {21, P_L2_DEST},
+    {22, P_PM_FENV},
+    {23, P_PM_OSC2},
+    {24, P_PM_DOSC},
+    {25, P_PM_DFILT},
+    {26, P_NOISE},
+    {27, P_O2_MODE},
+    {28, P_VINTAGE},
+    {29, P_SPREAD},
+    {30, P_UNISON},
+    {41, P_AVEL},
+    {43, P_AA},
+    {44, P_AD},
+    {45, P_AS},
+    {46, P_AR},
+    {47, P_ENV_AMT},
+    {50, P_FA},
+    {51, P_FD},
+    {52, P_FS},
+    {53, P_FR},
+    {54, P_HP_ENV},
+    {67, P_O1_FREQ},
+    {69, P_MIX_O1},
+    {70, P_O1_SHAPE},
+    {71, P_O1_PW},
+    {75, P_O2_FREQ},
+    {76, P_O2_FINE},
+    {77, P_MIX_O2},
+    {78, P_O2_SHAPE},
+    {79, P_O2_PW},
+    {80, P_AT_AMT},
+    {81, P_AT_DEST},
+    {85, P_CH_MIX},
+    {86, P_CH_RATE},
+    {87, P_CH_DEPTH},
+    {88, P_RV_TYPE},
+    {89, P_RV_MIX},
+    {90, P_RV_DECAY},
+    {102, P_CUTOFF},
+    {103, P_RESO},
+    {104, P_KEYTRK},
+    {105, P_FVEL},
+    {106, P_HPF},
+    {107, P_HP_RESO},
+    {110, P_RV_TONE},
+    {111, P_SP_MOD},
+    {112, P_SP_SHIM},
+    {113, P_SP_SWELL},
+    {114, P_SP_PRE},
+    {115, P_DL_MIX},
+    {116, P_DL_FB},
+    {117, P_DL_TIME_L},
+    {118, P_DL_TIME_R},
+    {119, P_DL_TONE}
+};
+/* the MIDI's interrupt keeps a CC's latest value per knob; the main loop turns the knobs (a fast sweep: only its
+ * newest value, once a loop) */
+static volatile uint8_t cc_new[NPARAM];  /* 0..127, or 255: nothing new */
+static int cc_param(int cc)
+{
+    uint32_t i;
+    for (i = 0; i < sizeof CC_MAP / sizeof CC_MAP[0]; i++)
+        if (CC_MAP[i][0] == cc)
+            return CC_MAP[i][1];
+    return -1;
+}
+
 /* ------------------------------------------------------------- the keys --- */
 /* The LOW SPLIT (OFFWORLD's): the keys left of POINT play SPLIT octaves down, in SCALE L (on KEY); the keys from POINT
  * on play in SCALE R, on KEY, or (FOLLOW ROOT) on the root the left hand plays: the lowest note sounding there, or the
@@ -1531,6 +1613,17 @@ static void input(void)
         else
             preset_browse(e);
     }
+    {                                    /* MIDI CCs: the knobs */
+        int k;
+        for (k = 0; k < NPARAM; k++) {
+            uint8_t v = cc_new[k];
+            if (v != 255u) {
+                cc_new[k] = 255u;
+                knob_put(k, ((int)v * PARAMS[k].max + 63) / 127);
+                ui.redraw = 1;
+            }
+        }
+    }
     while (mrec_r != mrec_w) {           /* MIDI notes for the recording */
         uint32_t k = mrec_r % 32u;
         if (mrec_on[k])
@@ -1588,6 +1681,7 @@ void app_input_only(void)
 /* ------------------------------------------------------------------ MIDI in --- */
 /* At 1 kHz (the timer interrupt): notes (the channel set on CLOCK, or all), pitch bend, the mod wheel, sustain,
  * cutoff, and the clock with START, CONTINUE, STOP */
+
 static volatile uint8_t midi_seen;
 void app_tick(void)
 {
@@ -1636,7 +1730,10 @@ void app_tick(void)
         } else if (type == 0xE0u) {
             eng_bend((float)((int)(d1 | d2 << 7) - 8192) * (1.0f / 8192.0f));
         } else if (type == 0xB0u) {
-            if (d1 == 1u)
+            int k = cc_param((int)d1);
+            if (k >= 0)                    /* a knob, from a controller: the current track's sound */
+                cc_new[k] = (uint8_t)d2;
+            else if (d1 == 1u)
                 eng_mod((float)d2 * (1.0f / 127.0f));
             else if (d1 == 64u)
                 eng_sustain(d2 >= 64u);
@@ -1647,6 +1744,7 @@ void app_tick(void)
         }
     }
 }
+
 
 /* ------------------------------------------------------------------ drawing --- */
 /* The look: a Prophet-6's front panel. Black, with walnut cheeks either side; cream legends; red section heads on
@@ -2443,6 +2541,8 @@ void app_init(void)
     for (k = 0; k < 128; k++)
         live_st[k] = -1;
     ui.copy_to = -1;
+    for (k = 0; k < NPARAM; k++)
+        cc_new[k] = 255u;
 }
 
 void app_render(int32_t *lr, uint32_t n, uint32_t master_q12)
@@ -2545,6 +2645,13 @@ int app_expect(const char *what, int *got)
 {
     if (!strcmp(what, "page"))
         *got = ui.page;
+    else if (!strncmp(what, "p", 1) && what[1] >= '0' && what[1] <= '9')   /* p12: the sound's parameter 12 */
+    {
+        int n = 0, i;
+        for (i = 1; what[i] >= '0' && what[i] <= '9'; i++)
+            n = n * 10 + (what[i] - '0');
+        *got = n < NPARAM ? ed.p[n] : -1;
+    }
     else if (!strcmp(what, "cur"))
         *got = CUR;
     else if (!strcmp(what, "edited"))
