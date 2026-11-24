@@ -137,7 +137,7 @@ how ROOM, HALL, PLATE or SPRING sound.
   (two: the seven voices are shared, and more lines would leave too few for each).
   - **Each track its own sound**: a preset, edited as you like, kept with the song. The seven voices are shared by the
     two tracks (a voice plays the sound of the track whose note it plays); the effects (reverb, space, chorus,
-    distortion, delay) are one set for the song: a preset loaded into track 1 brings its effects, into tracks 2-4 the
+    distortion, delay) are one set for the song: a preset loaded into track 1 brings its effects, into track 2 the
     song's stay; turning an FX page changes them for every track.
   - **Each track its own LENGTH (1-64 steps), RATE (1/8 .. 1/32, triplets), TRANSPOSE (±24) and MUTE**: tracks of
     different lengths run against each other (polymeter). SWING (CLOCK page) for all. PLAY starts them all from the top.
