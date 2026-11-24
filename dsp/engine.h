@@ -20,7 +20,9 @@
 #pragma once
 #include <stdint.h>
 
+#ifndef ENG_SR
 #define ENG_SR 44100.0f
+#endif
 #define NVOICE 7
 #define NTRK 2                          /* the tracks: each its own sound and its own line in the sequencer (two: the seven
                                          * voices go round) */

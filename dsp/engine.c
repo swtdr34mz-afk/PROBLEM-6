@@ -113,6 +113,11 @@ typedef struct {
     uint8_t hd, far;                     /* the spread's delay on the far side (samples), which side (0 L, 1 R) */
     uint8_t hw;
     float hbuf[HAAS];
+    /* audio-rate FM (poly mod by oscillator 2 to oscillator 1's FREQ): the oscillators at twice the rate, brought down
+     * through a half-band (OS_N taps), so the wide spectra FM makes do not fold back as grit */
+    float osb[16];
+    uint8_t osw, os_on;
+    float os_last;
 } voice_t;
 static voice_t V[NVOICE];
 #define ENV_END 3.2e-4f                  /* -70 dB: a release ends here */
@@ -666,6 +671,24 @@ INL float osc_tick(osc_t *o, const wave_t *w, float inc, float reset, int *wrapp
     return out;
 }
 
+/* the 2:1 half-band: 15 taps (every second one 0), stop band -32 dB from 0.6 of the output's Nyquist */
+#define OS_C1 0.313926f
+#define OS_C3 -0.093404f
+#define OS_C5 0.044110f
+#define OS_C7 -0.026488f
+INL float os_push2(voice_t *v, float a, float b)   /* two samples in (a, then b), one out */
+{
+    const float *q = v->osb;
+    uint32_t w;
+    v->osb[v->osw & 15u] = a;
+    v->osb[(v->osw + 1u) & 15u] = b;
+    v->osw = (uint8_t)(v->osw + 2u);
+    w = v->osw;                          /* q[(w - 1 - k) & 15]: the k-th newest */
+    return 0.5f * q[(w - 8u) & 15u] + OS_C1 * (q[(w - 7u) & 15u] + q[(w - 9u) & 15u])
+           + OS_C3 * (q[(w - 5u) & 15u] + q[(w - 11u) & 15u]) + OS_C5 * (q[(w - 3u) & 15u] + q[(w - 13u) & 15u])
+           + OS_C7 * (q[(w - 1u) & 15u] + q[(w - 15u) & 15u]);
+}
+
 /* ------------------------------------------------------------- the render --- */
 static float vb_l[2][NBLK], vb_r[2][NBLK];   /* the voices of each core, summed */
 static uint32_t blk_n;
@@ -911,6 +934,33 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
                         ae *= v->fade * v->fade * (3.0f - 2.0f * v->fade);   /* (smoothstep: no corner at either end) */
                     }
                 }
+                if (pm_f != 0.0f) {      /* audio-rate FM: twice the rate, two oscillator samples, one out */
+                    float xs[2], h1 = inc1 * 0.5f, h2 = inc2 * 0.5f;
+                    int hs;
+                    if (!v->os_on) {     /* (FM just came on: the half-band starts from where the sound is) */
+                        int z;
+                        for (z = 0; z < 16; z++)
+                            v->osb[z] = v->os_last;
+                        v->os_on = 1;
+                    }
+                    for (hs = 0; hs < 2; hs++) {
+                        o2 = osc_tick(&v->o2, &w2, h2, -1.0f, &wr2, &wd2);
+                        if (pm_sp)
+                            wave_set(&w1, sh1 + pm_s * o2, pw1 + pm_p * o2);
+                        o1 = osc_tick(&v->o1, &w1, fm_minf(h1 * ex2(pm_f * o2), 0.45f), (sync && wr2) ? wd2 : -1.0f, &wr1,
+                                      &wd1);
+                        if (wr1)
+                            v->flip = 1.0f - v->flip;
+                        t = (v->o1.ph + v->flip) * 0.5f;
+                        sub = 1.0f - 4.0f * fm_fabsf(t - 0.5f);
+                        xs[hs] = m1 * o1 + m2 * o2 + msub * sub;
+                    }
+                    x = os_push2(v, xs[0], xs[1]);
+                    if (mnoise > 0.0f)
+                        x += mnoise * noise_seed_f(&v->seed);
+                    goto filters;
+                }
+                v->os_on = 0;
                 /* oscillator 2 first: it is poly mod's source and the sync's master */
                 if (o2_used) {
                     o2 = osc_tick(&v->o2, &w2, inc2, -1.0f, &wr2, &wd2);
@@ -930,8 +980,10 @@ HOT static void voices_render(const uint8_t *list, int nv, float *restrict L, fl
                 t = (v->o1.ph + v->flip) * 0.5f;     /* the sub-octave: a triangle an octave down */
                 sub = 1.0f - 4.0f * fm_fabsf(t - 0.5f);
                 x = m1 * o1 + m2 * o2 + msub * sub;
+                v->os_last = x;
                 if (mnoise > 0.0f)
                     x += mnoise * noise_seed_f(&v->seed);
+            filters:
                 /* the high-pass (2-pole, state variable) */
                 if (hp_on) {             /* (at its bottom, below 24 Hz, it is left out) */
                     float qa1 = a1, qa2 = a2, qg = gh;

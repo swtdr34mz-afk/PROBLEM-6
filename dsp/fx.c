@@ -77,7 +77,8 @@ static int16_t dl_buf[2][DLN] PLAT_POOL;
 static uint32_t dl_w;
 static float dl_d[2], dl_lp[2], dl_hp[2], dl_xp[2], dl_y[2], dl_wet[2], dl_ph, dl_wow[2], dl_wowt[2], dl_wt[2], dl_lvl;
 static uint32_t dl_seed = 0x2468ACE1u;
-static float dc_x1, dc_x2, core_l, core_r;   /* the rate change */                   /* the spring's dispersion: first-order allpasses */
+static float dc_h[16], core_l, core_r;
+static uint32_t dc_w;   /* the rate change */                   /* the spring's dispersion: first-order allpasses */
 static float sw_g = 1.0f, sw_fast, sw_slow;   /* SWELL */
 static float hp_in, lp_out_l, lp_out_r, tail;
 static float dist_lpl, dist_lpr;
@@ -436,12 +437,13 @@ void fx_process(float *l, float *r, uint32_t n)
                 x = y;
             }
         }
-        /* down to the core's rate: a half-band of three taps over this sample and the two before; the core runs on
+        /* down to the core's rate: a half-band (below); the core runs on
          * every second sample, the output in between interpolated */
         {
-            float xd = 0.25f * (x + dc_x2) + 0.5f * dc_x1;
-            dc_x2 = dc_x1;
-            dc_x1 = x;
+            float xd;
+            uint32_t w;
+            dc_h[dc_w & 15u] = x;
+            w = ++dc_w;
             if (!(s & 1u)) {
                 lp_out_l += (core_l - lp_out_l) * 0.75f;   /* the core's latest */
                 lp_out_r += (core_r - lp_out_r) * 0.75f;
@@ -450,6 +452,11 @@ void fx_process(float *l, float *r, uint32_t n)
                 r[s] = R * dry_g + lp_out_r * wet_g;
                 continue;
             }
+            /* (15 taps, every second 0: what lies above 11 kHz stays out of the core instead of folding down into it) */
+            xd = 0.5f * dc_h[(w - 8u) & 15u] + 0.313926f * (dc_h[(w - 7u) & 15u] + dc_h[(w - 9u) & 15u])
+                 - 0.093404f * (dc_h[(w - 5u) & 15u] + dc_h[(w - 11u) & 15u])
+                 + 0.044110f * (dc_h[(w - 3u) & 15u] + dc_h[(w - 13u) & 15u])
+                 - 0.026488f * (dc_h[(w - 1u) & 15u] + dc_h[(w - 15u) & 15u]);
             x = xd;
         }
         for (k = 0; k < NAP; k++) {      /* diffusion: a burst of echoes into a wash */
