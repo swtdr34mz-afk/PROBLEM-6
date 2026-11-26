@@ -1,6 +1,6 @@
-# PROPHET 67 – Handbuch
+# PROBLEM 6 – Handbuch
 
-Ein 7-stimmiger Analog-Poly für das M-VAVE FM-1, angelehnt an den Sequential Prophet-6. Inoffiziell, Installation auf
+Ein 7-stimmiger Analog-Poly für das M-VAVE FM-1, im Geist der klassischen amerikanischen Analog-Polys. Inoffiziell, Installation auf
 eigene Gefahr.
 
 ## Bedienung
@@ -9,7 +9,7 @@ eigene Gefahr.
 | --- | --- |
 | Tasten | spielen; OCT- / OCT+ verschieben um ±3 Oktaven. Bei eingeschaltetem Arp füttern sie den Arp |
 | K1..K4 | die vier Regler der Seite (bipolare Regler rasten ein paar Klicks in der Mitte) |
-| SELECT | VINTAGE: jede Stimme bekommt ihren eigenen Charakter, von sauber bis „gut gealterter Prophet“ |
+| SELECT | VINTAGE: jede Stimme bekommt ihren eigenen Charakter, von sauber bis „gut gealterter Analog-Poly“ |
 | ALGORITHM | VOICE SPREAD: die Stimmen von der Mitte in ein breites Stereobild |
 | PRESET | die 16 Presets (im Step-Record: der Step) |
 | HOME | FILTER: CUTOFF, RESONANCE, ENV AMT, HP CUTOFF; nochmal FILTER 2: HP RESO, KEYBOARD, VELOCITY, HP ENV. 1 s halten: Preset wie gespeichert |
@@ -53,10 +53,10 @@ eigene Gefahr.
 
 ## Poly Mod, Vintage, Spread
 
-- **POLY MOD** wie beim Prophet: Filterhüllkurve und Oszillator 2 (auch im Audiobereich: FM, Filter-FM) modulieren
+- **POLY MOD** wie bei den klassischen Polys: Filterhüllkurve und Oszillator 2 (auch im Audiobereich: FM, Filter-FM) modulieren
   Tonhöhe, Wellenform und Pulsbreite von Oszillator 1 und die Filter. Mit OSC 2 auf LOW FRQ wird Oszillator 2 zum
   LFO pro Stimme. Probier PM BELLS, SYNC LEAD, PM GROWL, GLASS PAD.
-- **VINTAGE** (SELECT): 0 = sieben identische Stimmen; ab der Mitte deutlich hörbar, ganz oben ein alter Prophet:
+- **VINTAGE** (SELECT): 0 = sieben identische Stimmen; ab der Mitte deutlich hörbar, ganz oben ein alter Analog-Poly:
   pro Stimme eigene Stimmung (bis etwa ±12/±15 Cent je Oszillator, dazu Drift und ein paar Cent pro Anschlag),
   Filter (±0,6 Oktaven), Resonanz, Hüllkurvenzeiten (±55 %), Lautstärke (±3 dB), Wellenform und Filter-Sättigung –
   fest pro Stimme, nicht zufällig, damit Akkorde stimmig bleiben.
@@ -69,18 +69,18 @@ START/STOP/CONTINUE. Ausgang (USB): die Noten der Tasten.
 
 ### MIDI-CC-Liste (ab v1.4)
 
-Fast jeder Regler lässt sich von einem Controller aus steuern. Wo der Prophet-6 denselben Regler hat, ist es seine
-CC-Nummer, sodass Prophet-6-Vorlagen für Controller und Editoren direkt passen. Der Rest liegt auf CCs, die der Prophet-6
-frei lässt. 0–127 deckt den ganzen Regler ab, bei Auswahl-Reglern (z. B. LFO SHAPE) die Möglichkeiten gleichmäßig
-verteilt. Ein CC ändert den Sound der Spur, die gerade angezeigt ist (Sequencer-Spur 1 oder 2), auf dem eingestellten
-MIDI-Kanal (GLO → CLOCK → MIDI CH). Danach leuchtet SAVE wie beim Drehen am Gerät.
+Fast jeder Regler lässt sich von einem Controller aus steuern. Die mit * markierten nutzen dieselben CC-Nummern wie der
+Sequential Prophet-6, sodass dessen Controller-Vorlagen passen; der Rest liegt auf CCs, die dort frei sind. 0–127 deckt
+den ganzen Regler ab, bei Auswahl-Reglern (z. B. LFO SHAPE) die Möglichkeiten gleichmäßig verteilt. Ein CC ändert den
+Sound der Spur, die gerade angezeigt ist (Sequencer-Spur 1 oder 2), auf dem eingestellten MIDI-Kanal (GLO → CLOCK →
+MIDI CH). Danach leuchtet SAVE wie beim Drehen am Gerät.
 
 | CC | Regler | Hinweis |
 |---|---|---|
 | 1 | MOD WHEEL | mehr LFO 1 |
-| 5 | GLIDE | Glide-Zeit (wie Prophet-6) |
-| 8 | OSC 1 SUB OCT | Sub-Oszillator (wie Prophet-6) |
-| 9 | DISTORT | Verzerrung (wie Prophet-6) |
+| 5 | GLIDE | Glide-Zeit * |
+| 8 | OSC 1 SUB OCT | Sub-Oszillator * |
+| 9 | DISTORT | Verzerrung * |
 | 14 | LFO 1 RATE |  |
 | 15 | LFO 1 AMOUNT |  |
 | 16 | LFO 1 SHAPE | Auswahl |
@@ -98,28 +98,28 @@ MIDI-Kanal (GLO → CLOCK → MIDI CH). Danach leuchtet SAVE wie beim Drehen am 
 | 28 | VINTAGE | SELECT |
 | 29 | VOICE SPREAD | ALGORITHM |
 | 30 | UNISON | aus / an |
-| 41 | AMP VELOCITY |  (wie Prophet-6) |
-| 43 | AMP ATTACK |  (wie Prophet-6) |
-| 44 | AMP DECAY |  (wie Prophet-6) |
-| 45 | AMP SUSTAIN |  (wie Prophet-6) |
-| 46 | AMP RELEASE |  (wie Prophet-6) |
-| 47 | LPF ENV AMOUNT |  (wie Prophet-6) |
-| 50 | FILTER ATTACK |  (wie Prophet-6) |
-| 51 | FILTER DECAY |  (wie Prophet-6) |
-| 52 | FILTER SUSTAIN |  (wie Prophet-6) |
-| 53 | FILTER RELEASE |  (wie Prophet-6) |
-| 54 | HPF ENV AMOUNT |  (wie Prophet-6) |
+| 41 | AMP VELOCITY |  * |
+| 43 | AMP ATTACK |  * |
+| 44 | AMP DECAY |  * |
+| 45 | AMP SUSTAIN |  * |
+| 46 | AMP RELEASE |  * |
+| 47 | LPF ENV AMOUNT |  * |
+| 50 | FILTER ATTACK |  * |
+| 51 | FILTER DECAY |  * |
+| 52 | FILTER SUSTAIN |  * |
+| 53 | FILTER RELEASE |  * |
+| 54 | HPF ENV AMOUNT |  * |
 | 64 | SUSTAIN | Pedal |
-| 67 | OSC 1 FREQ |  (wie Prophet-6) |
-| 69 | OSC 1 LEVEL | Mixer (wie Prophet-6) |
-| 70 | OSC 1 SHAPE |  (wie Prophet-6) |
-| 71 | OSC 1 PW |  (wie Prophet-6) |
-| 74 | BRIGHTNESS | wird zum Cutoff addiert (wie Prophet-6) |
-| 75 | OSC 2 FREQ |  (wie Prophet-6) |
-| 76 | OSC 2 FINE |  (wie Prophet-6) |
-| 77 | OSC 2 LEVEL | Mixer (wie Prophet-6) |
-| 78 | OSC 2 SHAPE |  (wie Prophet-6) |
-| 79 | OSC 2 PW |  (wie Prophet-6) |
+| 67 | OSC 1 FREQ |  * |
+| 69 | OSC 1 LEVEL | Mixer * |
+| 70 | OSC 1 SHAPE |  * |
+| 71 | OSC 1 PW |  * |
+| 74 | BRIGHTNESS | wird zum Cutoff addiert * |
+| 75 | OSC 2 FREQ |  * |
+| 76 | OSC 2 FINE |  * |
+| 77 | OSC 2 LEVEL | Mixer * |
+| 78 | OSC 2 SHAPE |  * |
+| 79 | OSC 2 PW |  * |
 | 80 | AFTERTOUCH AMOUNT |  |
 | 81 | AFTERTOUCH DEST | Auswahl |
 | 85 | CHORUS MIX |  |
@@ -128,12 +128,12 @@ MIDI-Kanal (GLO → CLOCK → MIDI CH). Danach leuchtet SAVE wie beim Drehen am 
 | 88 | REVERB TYPE | Auswahl |
 | 89 | REVERB MIX |  |
 | 90 | REVERB DECAY |  |
-| 102 | LPF CUTOFF |  (wie Prophet-6) |
-| 103 | LPF RESONANCE |  (wie Prophet-6) |
-| 104 | LPF KEYBOARD | aus / halb / voll (wie Prophet-6) |
-| 105 | LPF VELOCITY |  (wie Prophet-6) |
-| 106 | HPF CUTOFF |  (wie Prophet-6) |
-| 107 | HPF RESONANCE |  (wie Prophet-6) |
+| 102 | LPF CUTOFF |  * |
+| 103 | LPF RESONANCE |  * |
+| 104 | LPF KEYBOARD | aus / halb / voll * |
+| 105 | LPF VELOCITY |  * |
+| 106 | HPF CUTOFF |  * |
+| 107 | HPF RESONANCE |  * |
 | 110 | REVERB TONE |  |
 | 111 | SPACE MOD |  |
 | 112 | SPACE SHIMMER |  |
@@ -152,3 +152,8 @@ MIDI-Kanal (GLO → CLOCK → MIDI CH). Danach leuchtet SAVE wie beim Drehen am 
 
 Auf der CLOCK-Seite (GLO zweimal) steht die CPU-Last. Bitte mit schweren Presets (PM GROWL, GLASS PAD, SPACE DRIFT)
 und sieben gehaltenen Tönen prüfen.
+
+---
+
+PROBLEM 6 ist ein unabhängiges, inoffizielles Projekt und steht in keiner Verbindung zu Sequential LLC oder Focusrite.
+„Prophet“ und „Prophet-6“ sind Marken ihrer Inhaber und werden nur genannt, um die Kompatibilität zu beschreiben.

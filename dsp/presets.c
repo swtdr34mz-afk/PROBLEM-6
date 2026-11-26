@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 swtdr34mz (PROPHET 67) */
+ * Copyright (C) 2026 swtdr34mz (PROBLEM 6) */
 /* The sixteen factory presets: classic analogue poly sounds in the Prophet manner. The names are our own.
  *
  * Reading a row: envelope times 0..127 run 1 ms .. 20 s (40: 22 ms, 60: 0.1 s, 80: 0.5 s, 100: 2.4 s); CUTOFF 0..255, 20 Hz ..

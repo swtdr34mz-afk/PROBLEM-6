@@ -1,31 +1,31 @@
-# PROPHET 67
+# PROBLEM 6
 
-A 7-voice analogue-style polysynth for the M-VAVE FM-1 by **swtdr34mz**, in the manner of the Sequential Prophet-6:
-its voice architecture, its POLY MOD, its VINTAGE character, its effects, its knob-per-function workflow, its panel.
+A 7-voice analogue-style polysynth for the M-VAVE FM-1 by **swtdr34mz**, in the spirit of the classic American analogue polys:
+their voice architecture, POLY MOD, VINTAGE character, effects, knob-per-function workflow and panel.
 Built on [fm1-base](https://github.com/charlesvestal/fm1-base) and [felucca-bsp](https://github.com/hugelton/felucca-bsp).
 
 Unofficial: not made, endorsed or supported by Sequential or M-VAVE. Install at your own risk.
 
 ![The panel](site/img/screen-main.png) ![OSC 1](site/img/screen-osc.png) ![POLY MOD](site/img/screen-polymod.png) ![SPACE](site/img/screen-space.png) ![LOW SPLIT](site/img/screen-split.png) ![DELAY](site/img/screen-delay.png)
 
-**Handbuch (Deutsch):** [docs/HANDBUCH.md](docs/HANDBUCH.md) · **In the browser:** [emulator](https://swtdr34mz-afk.github.io/PROPHET-67/emu/)
+**Handbuch (Deutsch):** [docs/HANDBUCH.md](docs/HANDBUCH.md) · **In the browser:** [emulator](https://swtdr34mz-afk.github.io/PROBLEM-6/emu/)
 
 ## Install
 
-Download `prophet67-1.0.fwsc` (or the newest) from [Releases](https://github.com/swtdr34mz-afk/PROPHET-67/releases)
+Download `problem6-1.0.fwsc` (or the newest) from [Releases](https://github.com/swtdr34mz-afk/PROBLEM-6/releases)
 and install it as any FM-1 firmware. Your presets and sequence are kept across updates.
 
 ## The voice
 
 Seven voices, each with:
 
-- **Two oscillators** with a continuously variable **SHAPE** (triangle → saw → pulse, crossfaded as on the Prophet-6)
+- **Two oscillators** with a continuously variable **SHAPE** (triangle → saw → pulse, crossfaded)
   and **PULSE WIDTH**; oscillator 1 with a **triangle sub-octave**. Band-limited (polyBLEP applied at each step in the
   wave, including hard-sync resets and audio-rate pulse-width changes).
 - **OSC 2 modes** (MIXER page): NORMAL, **SYNC** (oscillator 1 hard-synced to oscillator 2), **LOW FREQ** (oscillator 2
-  at LFO rates, following the keys) and **LF FIXED** (the same, not following the keys): the classic Prophet poly-mod
+  at LFO rates, following the keys) and **LF FIXED** (the same, not following the keys): the classic poly-mod
   LFO.
-- **Mixer**: OSC 1, OSC 2, SUB OCT, NOISE. Turn them all up and the filter's input saturates, as a Prophet's mixer does.
+- **Mixer**: OSC 1, OSC 2, SUB OCT, NOISE. Turn them all up and the filter's input saturates, as a classic analogue mixer does.
 - **A 2-pole resonant high-pass** into **a 4-pole resonant low-pass**: a zero-delay-feedback ladder with a saturating
   input, self-oscillating from about RESONANCE 115, losing a little bass as the resonance rises (not all of it
   compensated: that is part of the sound). Bipolar envelope amounts for both, keyboard tracking OFF / HALF / FULL,
@@ -41,7 +41,7 @@ Seven voices, each with:
 
 ## POLY MOD (EDIT)
 
-As on the Prophet-5 and -6: two per-voice sources, both **bipolar**,
+As on the classic polys: two per-voice sources, both **bipolar**,
 
 - **FILT ENV**: the voice's filter envelope
 - **OSC 2**: the voice's oscillator 2, at **audio rate** (FM, audio-rate filter and shape modulation, worked out sample
@@ -62,7 +62,7 @@ everything, so a chord stays in tune with itself and none sticks out. VINTAGE sc
 | --- | --- |
 | 0 | seven identical, perfectly stable voices |
 | 64 | a living poly: voices up to about ±10 cents apart, audibly brighter and darker voices, envelopes and levels differing |
-| 127 | an old Prophet: each oscillator up to ±12 / ±15 cents (a voice's two oscillators beat against each other), a slow ±10 cent drift, a few cents more per keystroke, cutoff ±0.6 octave, resonance ±40 %, envelope times ±55 %, levels ±3 dB, wave shape and width, and how hard each voice drives its filter |
+| 127 | a well-aged analogue poly: each oscillator up to ±12 / ±15 cents (a voice's two oscillators beat against each other), a slow ±10 cent drift, a few cents more per keystroke, cutoff ±0.6 octave, resonance ±40 %, envelope times ±55 %, levels ±3 dB, wave shape and width, and how hard each voice drives its filter |
 
 Measured on one note played seven times (each on the next voice) at VINTAGE 127: pitches spread over about ±20 cents,
 brightness from 335 to 620 Hz, levels over 5 dB. At 0 all seven are the same to the cent.
@@ -105,12 +105,12 @@ reading of a key being lifted is ignored, so nothing dips before the release (v0
 
 ## The effects
 
-In the Prophet-6's order:
+In this order:
 
 The FX button pages through **REVERB**, **SPACE REVERB**, **CHORUS**, **DELAY** and **DELAY MOD**. In the signal:
 distortion, chorus, delay, reverb (the delay's repeats go into the reverb, as pedals on a board).
 
-- **REVERB**: **ROOM, HALL, PLATE, SPRING** (dispersive, chirpy) as the Prophet-6's unit B has, and **SPACE**, an
+- **REVERB**: **ROOM, HALL, PLATE, SPRING** (dispersive, chirpy) , and **SPACE**, an
   ambient reverb after the Meris Mercury7: long modulated lines, deep diffusion, decays up to 70 s, and held forever at
   DECAY 127. MIX, DECAY, TONE (darker / brighter). The **PLATE** (v0.2) is dense and smooth: two allpass diffusers
   inside every line of the loop and a slow wobble smear its modes so nothing rings metallic, and it is warmer at the
@@ -194,17 +194,16 @@ backed up and restored over USB.
 
 ### MIDI CC (v1.4)
 
-Nearly every knob takes a CC. Where the Prophet-6 has the same knob, it is the Prophet-6's number (its controller
-templates and editors fit); the rest sit on CCs the Prophet-6 leaves free. 0..127 spans the knob (a choice: its options,
-evenly). A CC edits the sound of the track on screen (the sequencer's track 1 or 2), on the MIDI channel set (GLO, CLOCK,
-MIDI CH).
+Nearly every knob takes a CC. The ones marked * use the CC numbers of the Sequential Prophet-6, so its controller
+templates fit; the rest sit on CCs left free there. 0..127 spans the knob (a choice: its options, evenly). A CC edits
+the sound of the track on screen (the sequencer's track 1 or 2), on the MIDI channel set (GLO, CLOCK, MIDI CH).
 
 | CC | Knob | Note |
 |---|---|---|
 | 1 | MOD WHEEL | Mod wheel: more LFO 1 |
-| 5 | GLIDE | Glide time (as the Prophet-6) |
-| 8 | OSC 1 SUB OCT | Sub oscillator (as the Prophet-6) |
-| 9 | DISTORT | Distortion (as the Prophet-6) |
+| 5 | GLIDE | Glide time * |
+| 8 | OSC 1 SUB OCT | Sub oscillator * |
+| 9 | DISTORT | Distortion * |
 | 14 | LFO 1 RATE |  |
 | 15 | LFO 1 AMOUNT |  |
 | 16 | LFO 1 SHAPE | choice |
@@ -222,28 +221,28 @@ MIDI CH).
 | 28 | VINTAGE |  |
 | 29 | VOICE SPREAD |  |
 | 30 | UNISON | off / on |
-| 41 | AMP VELOCITY |  (as the Prophet-6) |
-| 43 | AMP ATTACK |  (as the Prophet-6) |
-| 44 | AMP DECAY |  (as the Prophet-6) |
-| 45 | AMP SUSTAIN |  (as the Prophet-6) |
-| 46 | AMP RELEASE |  (as the Prophet-6) |
-| 47 | LPF ENV AMOUNT |  (as the Prophet-6) |
-| 50 | FILTER ATTACK |  (as the Prophet-6) |
-| 51 | FILTER DECAY |  (as the Prophet-6) |
-| 52 | FILTER SUSTAIN |  (as the Prophet-6) |
-| 53 | FILTER RELEASE |  (as the Prophet-6) |
-| 54 | HPF ENV AMOUNT |  (as the Prophet-6) |
+| 41 | AMP VELOCITY |  * |
+| 43 | AMP ATTACK |  * |
+| 44 | AMP DECAY |  * |
+| 45 | AMP SUSTAIN |  * |
+| 46 | AMP RELEASE |  * |
+| 47 | LPF ENV AMOUNT |  * |
+| 50 | FILTER ATTACK |  * |
+| 51 | FILTER DECAY |  * |
+| 52 | FILTER SUSTAIN |  * |
+| 53 | FILTER RELEASE |  * |
+| 54 | HPF ENV AMOUNT |  * |
 | 64 | SUSTAIN | pedal |
-| 67 | OSC 1 FREQ |  (as the Prophet-6) |
-| 69 | OSC 1 LEVEL | mixer (as the Prophet-6) |
-| 70 | OSC 1 SHAPE |  (as the Prophet-6) |
-| 71 | OSC 1 PW |  (as the Prophet-6) |
-| 74 | BRIGHTNESS | added to the cutoff (as the Prophet-6) |
-| 75 | OSC 2 FREQ |  (as the Prophet-6) |
-| 76 | OSC 2 FINE |  (as the Prophet-6) |
-| 77 | OSC 2 LEVEL | mixer (as the Prophet-6) |
-| 78 | OSC 2 SHAPE |  (as the Prophet-6) |
-| 79 | OSC 2 PW |  (as the Prophet-6) |
+| 67 | OSC 1 FREQ |  * |
+| 69 | OSC 1 LEVEL | mixer * |
+| 70 | OSC 1 SHAPE |  * |
+| 71 | OSC 1 PW |  * |
+| 74 | BRIGHTNESS | added to the cutoff * |
+| 75 | OSC 2 FREQ |  * |
+| 76 | OSC 2 FINE |  * |
+| 77 | OSC 2 LEVEL | mixer * |
+| 78 | OSC 2 SHAPE |  * |
+| 79 | OSC 2 PW |  * |
 | 80 | AFTERTOUCH AMOUNT |  |
 | 81 | AFTERTOUCH DEST | choice |
 | 85 | CHORUS MIX |  |
@@ -252,12 +251,12 @@ MIDI CH).
 | 88 | REVERB TYPE | choice |
 | 89 | REVERB MIX |  |
 | 90 | REVERB DECAY |  |
-| 102 | LPF CUTOFF |  (as the Prophet-6) |
-| 103 | LPF RESONANCE |  (as the Prophet-6) |
-| 104 | LPF KEYBOARD | off / half / full (as the Prophet-6) |
-| 105 | LPF VELOCITY |  (as the Prophet-6) |
-| 106 | HPF CUTOFF |  (as the Prophet-6) |
-| 107 | HPF RESONANCE |  (as the Prophet-6) |
+| 102 | LPF CUTOFF |  * |
+| 103 | LPF RESONANCE |  * |
+| 104 | LPF KEYBOARD | off / half / full * |
+| 105 | LPF VELOCITY |  * |
+| 106 | HPF CUTOFF |  * |
+| 107 | HPF RESONANCE |  * |
 | 110 | REVERB TONE |  |
 | 111 | SPACE MOD |  |
 | 112 | SPACE SHIMMER |  |
@@ -278,7 +277,7 @@ UNISON LEAD, CLAV, GLASS PAD, VINTAGE KEYS, INIT. Edits sound at once and are ke
 
 ## The screen
 
-A Prophet-6's front panel for 240 × 240: black with walnut cheeks, cream legends, red section heads on their tabs,
+A classic analogue poly's front panel for 240 × 240: black with walnut cheeks, cream legends, red section heads on their tabs,
 knobs with a red pointer, the voices' red LEDs (lit by each voice's amp envelope). HOME shows the panel at a glance
 (the two oscillators' waveforms, the filter, the envelope); the other pages show their section with a live view
 (waveforms, envelope shapes, the LFO's trace, the poly-mod routing, the reverb's tail, where each voice stands in the
@@ -315,16 +314,21 @@ stereo field, the sixteen bars). POLY MOD, VOICE SPREAD, VINTAGE and the sequenc
 
 ## Building
 
-    git clone --recursive https://github.com/swtdr34mz-afk/PROPHET-67
+    git clone --recursive https://github.com/swtdr34mz-afk/PROBLEM-6
     X0X_FONTSET=terminus python3 fm1-base/tools/build.py . --host
-    build/host/prophet67_host tests/basic.txt build/host
-    build/host/prophet67_host tests/seq.txt build/host
-    build/host/prophet67_host tests/tracks.txt build/host
-    build/host/prophet67_host tests/cc.txt build/host
+    build/host/problem6_host tests/basic.txt build/host
+    build/host/problem6_host tests/seq.txt build/host
+    build/host/problem6_host tests/tracks.txt build/host
+    build/host/problem6_host tests/cc.txt build/host
 
-GitHub Actions builds the `.fwsc` on every push (Actions → the run → Artifacts → prophet67-firmware), and puts the
+GitHub Actions builds the `.fwsc` on every push (Actions → the run → Artifacts → problem6-firmware), and puts the
 browser emulator on GitHub Pages. A tag `v*` makes a release with the `.fwsc` attached.
 
 ## Licence
 
 MPL-2.0. See [CREDITS.md](CREDITS.md).
+
+---
+
+PROBLEM 6 is an independent, unofficial project. It is not affiliated with, endorsed by or connected to Sequential LLC
+or Focusrite. "Prophet" and "Prophet-6" are trademarks of their owners and are named only to describe compatibility.

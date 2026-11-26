@@ -1,8 +1,8 @@
 # Builds the firmware (.fwsc, installable on an FM-1) on GitHub's machines, which can reach JieLi's toolchain server.
 # Also runs the host simulator's tests (a failing test does not stop the build).
-# Result: Actions tab > the run > "Artifacts" > prophet67-firmware.
-# On a tag (v0.1, v1.0 ...) the release gets the .fwsc. Every push to main also puts PROPHET 67 in the browser
-# (fm1-base's emulator: the same app compiled to WebAssembly) on GitHub Pages: https://swtdr34mz-afk.github.io/PROPHET-67/emu/
+# Result: Actions tab > the run > "Artifacts" > problem6-firmware.
+# On a tag (v0.1, v1.0 ...) the release gets the .fwsc. Every push to main also puts PROBLEM 6 in the browser
+# (fm1-base's emulator: the same app compiled to WebAssembly) on GitHub Pages: https://swtdr34mz-afk.github.io/PROBLEM-6/emu/
 # (the Firmware Hub card's play key, fmhub.json "play"; Settings > Pages > Source: GitHub Actions).
 name: Build firmware
 on:
@@ -36,12 +36,12 @@ jobs:
         continue-on-error: true      # a failing test is shown in the log but does not stop the firmware build
         run: |
           python3 fm1-base/tools/build.py . --host
-          build/host/prophet67_host tests/basic.txt build/host
-          build/host/prophet67_host tests/seq.txt build/host
-          build/host/prophet67_host tests/stress.txt build/host
-          build/host/prophet67_host tests/split.txt build/host
-          build/host/prophet67_host tests/tracks.txt build/host
-          build/host/prophet67_host tests/cc.txt build/host
+          build/host/problem6_host tests/basic.txt build/host
+          build/host/problem6_host tests/seq.txt build/host
+          build/host/problem6_host tests/stress.txt build/host
+          build/host/problem6_host tests/split.txt build/host
+          build/host/problem6_host tests/tracks.txt build/host
+          build/host/problem6_host tests/cc.txt build/host
 
       - name: JieLi toolchain
         run: fm1-base/tools/get_toolchain.sh "$HOME/.jieli"
@@ -83,7 +83,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: prophet67-firmware
+          name: problem6-firmware
           path: |
             build/*.fwsc
             build/*.bin
@@ -100,7 +100,7 @@ jobs:
             build/firmware.json
 
   emulator:
-    # PROPHET 67 in the browser: tools/build.py --web (Emscripten), the page and app.wasm in build/emu
+    # PROBLEM 6 in the browser: tools/build.py --web (Emscripten), the page and app.wasm in build/emu
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -126,8 +126,8 @@ jobs:
           mkdir -p _site
           cp -r build/emu _site/emu
           cp -r web/words _site/words          # the screen reader's words (the page reads ../words/)
-          printf '%s\n' '<!doctype html><meta charset="utf-8"><title>PROPHET 67</title>' \
-            '<meta http-equiv="refresh" content="0; url=emu/"><a href="emu/">PROPHET 67 in the browser</a>' > _site/index.html
+          printf '%s\n' '<!doctype html><meta charset="utf-8"><title>PROBLEM 6</title>' \
+            '<meta http-equiv="refresh" content="0; url=emu/"><a href="emu/">PROBLEM 6 in the browser</a>' > _site/index.html
           ls -la _site _site/emu
 
       - uses: actions/upload-pages-artifact@v3

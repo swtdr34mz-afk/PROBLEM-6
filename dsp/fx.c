@@ -1,7 +1,7 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 swtdr34mz (PROPHET 67) */
-/* PROPHET 67's effects, in the Prophet-6's order: the analogue distortion, then FX A (a BBD-style stereo chorus), then
- * FX B, a reverb: ROOM, HALL, PLATE and SPRING as the Prophet-6's unit B has, and SPACE, an ambient reverb after the
+ * Copyright (C) 2026 swtdr34mz (PROBLEM 6) */
+/* PROBLEM 6's effects, in the Prophet-6's order: the analogue distortion, then FX A (a BBD-style stereo chorus), then
+ * FX B, a reverb: ROOM, HALL, PLATE and SPRING , and SPACE, an ambient reverb after the
  * Meris Mercury7 (modulated, diffuse, very long, with SWELL, SHIMMER and PREDELAY).
  *
  * The reverbs share one core: input diffusion (allpasses), eight delay lines with a Householder feedback matrix, each

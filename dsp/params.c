@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 swtdr34mz (PROPHET 67) */
+ * Copyright (C) 2026 swtdr34mz (PROBLEM 6) */
 /* The parameters: their names, kinds and choices, and how their values read on the screen (engine.h). */
 #include "engine.h"
 

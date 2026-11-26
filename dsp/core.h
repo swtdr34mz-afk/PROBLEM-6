@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 swtdr34mz (PROPHET 67) */
+ * Copyright (C) 2026 swtdr34mz (PROBLEM 6) */
 /* The engine's parts talking to each other (not the app's): the voices (engine.c), the effects (fx.c), the clock with
  * the sequencer and the arp (clock.c). Everything here runs in the render unless it says otherwise. */
 #pragma once

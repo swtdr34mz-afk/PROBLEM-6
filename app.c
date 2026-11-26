@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 swtdr34mz (PROPHET 67) */
-/* PROPHET 67: the panel (input, pages, knobs), the presets, the sequencer's editing, MIDI in and out, the screen (a
+ * Copyright (C) 2026 swtdr34mz (PROBLEM 6) */
+/* PROBLEM 6: the panel (input, pages, knobs), the presets, the sequencer's editing, MIDI in and out, the screen (a
  * Prophet-6's front panel, drawn for 240 x 240), settings. Part of the unity build (device/unity.c, host/plat_host.c),
  * after the platform: gfx.c and announce.c are in scope. The sound is dsp/ (engine.h).
  *
@@ -1909,7 +1909,7 @@ static void draw_head(void)
     char t[4];
     const felucca_font_t *nf;
     int32_t bx = 135, bw = 101, i, ax = bx + bw - 10;
-    cv_text(7, 1, &FONT_M, "PROPHET 67", K_CREAM);
+    cv_text(7, 1, &FONT_M, "PROBLEM 6", K_CREAM);
     cv_rect(131, 4, 1, 18, K_GREY);
     frame_rect(bx, 2, bw, 22, K_CREAM);
     frame_rect(bx + 1, 3, bw - 2, 20, K_DIM);
@@ -2482,7 +2482,7 @@ static void draw_logo(int lit)          /* the name, the red rule, the seven voi
         cv_oy = -by;
         wood(0, 6);
         wood(234, 6);
-        ctext(120, 70, &FONT_L, "PROPHET 67", K_CREAM);
+        ctext(120, 70, &FONT_L, "PROBLEM 6", K_CREAM);
         cv_rect(30, 108, 180, 2, K_RED);
         ctext(120, 116, &FONT_XS, "7-VOICE POLYPHONIC SYNTHESIZER", K_GREY);
         for (v = 0; v < NVOICE; v++) {
@@ -2577,7 +2577,7 @@ void app_frame(void)
     input();
     lights();
     if (ann_on() && ann_where()) {
-        char t[64] = "PROPHET 67. ";
+        char t[64] = "PROBLEM 6. ";
         text_cat(t, ed.name);
         text_cat(t, ". ");
         text_cat(t, PAGES[ui.page].title);

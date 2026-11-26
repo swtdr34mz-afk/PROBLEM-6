@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 swtdr34mz (PROPHET 67) */
+ * Copyright (C) 2026 swtdr34mz (PROBLEM 6) */
 /* The clock, the step sequencer and the arpeggiator (engine.h). They run in the render, before the voices: a block's
  * ticks are counted, steps and arp notes go straight to the voices, so they land within a block (2.9 ms) of their time
  * and never drift. The clock is 24 ticks a quarter note, from BPM, or from MIDI clock while it comes in (START, STOP

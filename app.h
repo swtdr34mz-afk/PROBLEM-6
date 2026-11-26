@@ -1,13 +1,13 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 swtdr34mz (PROPHET 67) */
-/* PROPHET 67 by swtdr34mz: a 7-voice analogue-style polysynth for the M-VAVE FM-1 (on fm1-base), in the manner of the
+ * Copyright (C) 2026 swtdr34mz (PROBLEM 6) */
+/* PROBLEM 6 by swtdr34mz: a 7-voice analogue-style polysynth for the M-VAVE FM-1 (on fm1-base), in the manner of the
  * Sequential Prophet-6. This header is the app's half of the contract with the platform (device/unity.c,
  * host/plat_host.c). */
 #pragma once
 #include <stdint.h>
 #include "plat.h"
 
-#define APP_NAME "PROPHET 67"
+#define APP_NAME "PROBLEM 6"
 #define APP_SPLASH_RGB RGB(232, 40, 32)
 #define APP_SPLASH                       /* app_splash: the panel's own title, not the platform's page */
 #define APP_TICK                         /* app_tick: MIDI in (notes, controllers, clock), at 1 kHz */

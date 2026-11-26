@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 swtdr34mz (PROPHET 67) */
-/* PROPHET 67's voices (engine.h): oscillators, mixer, filters, envelopes, poly mod, vintage and spread, the voice
+ * Copyright (C) 2026 swtdr34mz (PROBLEM 6) */
+/* PROBLEM 6's voices (engine.h): oscillators, mixer, filters, envelopes, poly mod, vintage and spread, the voice
  * allocation, and the render that runs them on both cores and hands the sum to the effects (fx.c).
  *
  * Rates: the oscillators, filters and envelopes per sample; pitches, cutoffs and their coefficients per chunk of CH

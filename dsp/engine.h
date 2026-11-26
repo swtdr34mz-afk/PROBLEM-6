@@ -1,6 +1,6 @@
 /* SPDX-License-Identifier: MPL-2.0
- * Copyright (C) 2026 swtdr34mz (PROPHET 67) */
-/* PROPHET 67's sound engine: a 7-voice analogue-style poly in the manner of the Sequential Prophet-6.
+ * Copyright (C) 2026 swtdr34mz (PROBLEM 6) */
+/* PROBLEM 6's sound engine: a 7-voice analogue-style poly in the spirit of the classic American analogue polys.
  *
  *   voice     two oscillators with a continuously variable shape (triangle - saw - pulse) and pulse width, a triangle
  *             sub-octave under oscillator 1, white noise; oscillator 1 hard-synced to oscillator 2, oscillator 2's
