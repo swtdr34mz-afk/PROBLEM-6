@@ -1903,13 +1903,53 @@ static void adsr_draw(int32_t x, int32_t y, int32_t w, int32_t h, const uint8_t 
     cv_rect(x0, yb, w, 1, K_DIM);
 }
 
-/* ---- the head: the name, the preset ---- */
+/* ---- the head: the name, the battery, the preset ---- */
+/* the battery, right of the name (on every page: the head is): its bars (0..3), red and blinking when empty; a USB
+ * host's power: a red bolt in it; not read yet (the emulator): nothing */
+static void draw_battery(int32_t x, int32_t y)
+{
+    int b = plat_battery(), i;
+    uint16_t c, cd;
+    if (b < 0)
+        return;
+    c = cd = b == 0 ? K_RED : K_CREAM;   /* the frame light; empty: red, blinking */
+    if (b == 0 && (plat_ms() / 500u) % 2u)
+        c = cd = K_RED_D;
+    /* the cell, 15 x 11, its corners rounded off; the tip on the right */
+    cv_rect(x + 1, y, 13, 1, c);
+    cv_rect(x + 1, y + 10, 13, 1, cd);
+    cv_rect(x, y + 1, 1, 9, c);
+    cv_rect(x + 14, y + 1, 1, 9, cd);
+    cv_rect(x + 15, y + 3, 1, 5, cd);
+    cv_rect(x + 16, y + 3, 1, 5, cd);
+    cv_rect(x + 15, y + 3, 2, 1, c);
+    if (b >= 4) {                        /* on USB: a bolt, filled */
+        static const uint8_t BOLT[9][2] = {{7, 3}, {6, 3}, {5, 3}, {4, 3}, {3, 8}, {6, 3}, {5, 3}, {4, 3}, {4, 2}};
+        static const int8_t BX[9] = {7, 6, 5, 4, 3, 6, 5, 4, 4};
+        for (i = 0; i < 9; i++)
+            cv_rect(x + 1 + BX[i], y + 1 + i, BOLT[i][1], 1, K_RED);
+        return;
+    }
+    for (i = 0; i < 3; i++) {            /* the bars: lit (a light top, a shade under), or a dim outline */
+        int32_t bx = x + 2 + i * 4;
+        if (i < b) {
+            uint16_t f = K_RED, fd = K_RED_M;   /* the bars red, as the panel's heads */
+            cv_rect(bx, y + 2, 3, 1, f);
+            cv_rect(bx, y + 3, 3, 5, f);
+            cv_rect(bx, y + 8, 3, 1, fd);
+        } else {
+            cv_rect(bx, y + 2, 3, 7, K_DIM);
+        }
+    }
+}
+
 static void draw_head(void)
 {
     char t[4];
     const felucca_font_t *nf;
     int32_t bx = 135, bw = 101, i, ax = bx + bw - 10;
     cv_text(7, 1, &FONT_M, "PROBLEM 6", K_CREAM);
+    draw_battery(112, 7);
     cv_rect(131, 4, 1, 18, K_GREY);
     frame_rect(bx, 2, bw, 22, K_CREAM);
     frame_rect(bx + 1, 3, bw - 2, 20, K_DIM);

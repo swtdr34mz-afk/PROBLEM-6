@@ -25,6 +25,9 @@ eigene Gefahr.
 | REC | Aufnahme in die gewählte Spur: gestoppt Schritt für Schritt (Seite STEP EDIT), laufend live. 1 s halten: Spur löschen |
 | SAVE | bearbeitetes Preset in seinem Platz speichern; halten + PRESET: in einen anderen Platz (beim Loslassen). Leuchtet SAVE, ist etwas geändert und noch nicht gespeichert |
 
+**Akku-Anzeige (v1.6):** oben rechts neben dem Namen, auf jeder Seite. 3 Balken = voll; bei einem Balken wird er rot,
+leer blinkt das Symbol rot. Ein Blitz heißt: Das FM-1 hängt am USB eines Computers und wird von dort versorgt.
+
 ## Sequencer (v1.1): 2 Spuren × 64 Steps
 
 - **Zwei Spuren**, jede mit **eigenem Sound** (ein Preset, beliebig bearbeitet, mit dem Song gespeichert) und eigener

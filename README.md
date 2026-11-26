@@ -15,6 +15,9 @@ Unofficial: not made, endorsed or supported by Sequential or M-VAVE. Install at 
 Download `problem6-1.0.fwsc` (or the newest) from [Releases](https://github.com/swtdr34mz-afk/PROBLEM-6/releases)
 and install it as any FM-1 firmware. Your presets and sequence are kept across updates.
 
+The battery is shown in the head on every page, right of the name: three bars full, the last one red, empty: blinking
+red; a bolt when a computer's USB powers the FM-1.
+
 ## The voice
 
 Seven voices, each with:
