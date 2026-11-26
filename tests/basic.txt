@@ -59,6 +59,14 @@ expect page 3
 tap SEL
 expect page 4
 shot mixer.png
+# OSC 2 to LOW FREQ (K4, MODE): it is an LFO now, not heard: said, and the mixer marks it
+turn K4 2
+wait 100
+expect p11 2
+shot mixer_lfo.png
+turn K4 -2
+wait 1500
+expect p11 0
 tap ENV
 expect page 5
 shot fenv.png

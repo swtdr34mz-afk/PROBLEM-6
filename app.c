@@ -637,6 +637,12 @@ static int knob_get(int code)
 static void knob_put(int code, int v)
 {
     if (code < NPARAM) {
+        /* OSC 2 at LFO rates (LOW FREQ, LF FIXED) is a modulation source, not heard: said when it goes there, and when
+         * its mixer level is turned there */
+        int lf_was = ed.p[P_O2_MODE] == O2M_LOW || ed.p[P_O2_MODE] == O2M_LOWFIX;
+        int lf_now = code == P_O2_MODE ? (v == O2M_LOW || v == O2M_LOWFIX) : lf_was;
+        if ((code == P_O2_MODE && lf_now && !lf_was) || (code == P_MIX_O2 && lf_now && !ui.msg_until))
+            app_say("OSC 2 IS AN LFO NOW", "NOT HEARD: USE POLY MOD");
         ed.p[code] = (uint8_t)v;
         edited = 1;
         if (FX_PARAM(code)) {            /* the effects: the song's, in every track's sound */
@@ -2067,9 +2073,10 @@ static void page_visual(int32_t x, int32_t y, int32_t w, int32_t h)
         const int pv[4] = {ed.p[P_MIX_O1], ed.p[P_MIX_O2], ed.p[P_O1_SUB], ed.p[P_NOISE]};
         for (i = 0; i < 4; i++) {
             int32_t bx = x + 8 + i * 56, bw = 40, fill = pv[i] * (bw - 2) / 127;
-            cv_text(bx, y + 2, &FONT_XS, L[i], K_GREY);
+            int lf = i == 1 && (ed.p[P_O2_MODE] == O2M_LOW || ed.p[P_O2_MODE] == O2M_LOWFIX);
+            cv_text(bx, y + 2, &FONT_XS, lf ? "OSC 2 LFO" : L[i], lf ? K_RED : K_GREY);   /* (LFO: not heard) */
             cv_rect(bx, y + 16, bw, 8, K_CELL);
-            cv_rect(bx + 1, y + 17, fill, 6, K_RED);
+            cv_rect(bx + 1, y + 17, fill, 6, lf ? K_DIM : K_RED);
         }
         break;
     }
