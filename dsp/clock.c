@@ -93,7 +93,8 @@ float clock_spt(void) { return spt_now(); }
 float clock_pos(void)
 {
     float f = eng_clock_ext() && ext_spt > 0.0f ? since_ext / ext_spt : acc / spt;
-    return (float)ticks + fm_minf(f, 0.999f);
+    return (float)(ticks % 3072u) + fm_minf(f, 0.999f);   /* (wrapped: 3072 is a whole number of every synced
+                                                            * LFO's cycles, and a float keeps its fraction) */
 }
 
 /* a step of a track: its notes on, at its velocity, for its gate (a TIE holds the notes before) */

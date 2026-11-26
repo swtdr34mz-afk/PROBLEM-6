@@ -226,7 +226,8 @@ float fx_tail(void) { return tail; }
 /* ----------------------------------------------------------- the pieces --- */
 INL float rd_frac(const float *b, uint32_t mask_or_len, uint32_t w, float d, int pow2)
 {
-    float rp = (float)w - d;
+    float rp = (float)(pow2 ? (w & mask_or_len) : w) - d;   /* (masked first: a free-running write position as a
+                                                              * float loses its fraction after 2^24, 6 min 20 s) */
     int32_t i;
     float f, a, c;
     uint32_t i0, i1;
